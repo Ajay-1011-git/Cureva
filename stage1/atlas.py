@@ -11,6 +11,8 @@ values appear only in comments, as worked examples.
 """
 from __future__ import annotations
 
+import logging
+import re
 import time
 from bisect import bisect_right
 from pathlib import Path
@@ -18,7 +20,10 @@ from typing import Any, Iterable
 
 from schemas import Answer, Finding, Question, RecordRef
 from study import DOMAINS as CSV_DOMAINS
-from study import SEQ_COL, Study, parse_date, standardise_lab, to_number
+from study import (NoReferenceRange, SEQ_COL, Study, UnitMismatch, central_range,
+                   parse_date, standardise_lab, to_number)
+
+log = logging.getLogger("cureva.atlas")
 
 #: The nine organiser domains plus Cureva's PRO, the tenth. PRO is written only
 #: by intake/ (Act 1) and is always present and always empty here — a graded run
@@ -583,6 +588,124 @@ def _metric_discontinued_ae(atlas: "Atlas", question: Question,
     )
 
 
+# ======================================================= protocol as evidence
+#
+# Rules live in the protocol document, and the document changes mid-study. Every
+# rule below is read from the version in force at the question's cut (FR-17),
+# with a documented constant as the fallback when the sentence cannot be parsed
+# confidently. The constants are the practice protocol's values; they are a
+# safety net, never the primary source, and a mismatch is logged rather than
+# silently preferred.
+
+#: protocol_v1.md §7: "ALT or AST > 3 × ULN together with total bilirubin
+#: > 2 × ULN within 14 days".
+DEFAULT_HYS_ENZYME_MULTIPLE = 3.0
+DEFAULT_HYS_BILIRUBIN_MULTIPLE = 2.0
+DEFAULT_HYS_WINDOW_DAYS = 14
+
+
+def protocol_section(text: str, number: int) -> str:
+    """The body of one numbered section of a protocol markdown document.
+
+    Matches "## 7. Liver safety" through to the next "##" heading. Returns ""
+    when the section is absent, so a caller falls back rather than crashes on a
+    hidden study that numbers its sections differently.
+    """
+    pattern = re.compile(rf"^##\s*{number}\.?\s.*?$(.*?)(?=^##\s|\Z)",
+                         re.MULTILINE | re.DOTALL)
+    m = pattern.search(text or "")
+    return m.group(1).strip() if m else ""
+
+
+def _find_section_about(text: str, *keywords: str) -> str:
+    """The first section whose heading mentions one of these keywords.
+
+    Used when a hidden study renumbers its sections: the heading wording is a
+    better anchor than the number, so both are tried.
+    """
+    for m in re.finditer(r"^##\s*(\d+)\.?\s*(.*?)$(.*?)(?=^##\s|\Z)",
+                         text or "", re.MULTILINE | re.DOTALL):
+        heading = m.group(2).lower()
+        if any(k in heading for k in keywords):
+            return m.group(3).strip()
+    return ""
+
+
+class ProtocolRules:
+    """The rules in force at one cut, read from that cut's protocol document.
+
+    Constructed per question rather than cached across questions, so an
+    amendment landing on disk mid-run is picked up on the next call and no
+    answer is ever served from a stale protocol (PRD G4/FR-4/FR-5).
+    """
+
+    def __init__(self, graph: "StudyGraph", cut: int | None):
+        self.cut = cut
+        self.version = graph.protocol_version_at(cut)
+        try:
+            self.document_name, self.text = graph.protocol_document_at(cut)
+        except (KeyError, OSError) as exc:
+            log.warning("protocol document unavailable at cut %s: %s", cut, exc)
+            self.document_name, self.text = f"protocol_v{self.version}", ""
+        self.warnings: list[str] = []
+
+        self.liver_text = (protocol_section(self.text, 7)
+                           or _find_section_about(self.text, "liver", "hepatic", "hy"))
+        (self.hys_enzyme_multiple,
+         self.hys_bilirubin_multiple,
+         self.hys_window_days) = self._read_hys_thresholds()
+
+    # -------------------------------------------------------------- Hy's law
+    def _read_hys_thresholds(self) -> tuple[float, float, int]:
+        """Thresholds for the Hy's law rule, from the active protocol's text.
+
+        The sentence has a stable shape across amendments — two "N × ULN"
+        multiples and a "within K days" window — so the numbers are read from
+        it rather than assumed. If the sentence is missing or does not parse
+        cleanly, the practice protocol's documented values are used and the
+        discrepancy is recorded, because answering with a silently wrong
+        threshold is worse than answering with a flagged fallback.
+        """
+        text = self.liver_text
+        if not text:
+            self.warnings.append(
+                f"{self.document_name}: no liver-safety section found; "
+                f"using documented defaults {DEFAULT_HYS_ENZYME_MULTIPLE}x/"
+                f"{DEFAULT_HYS_BILIRUBIN_MULTIPLE}x/{DEFAULT_HYS_WINDOW_DAYS}d")
+            return (DEFAULT_HYS_ENZYME_MULTIPLE, DEFAULT_HYS_BILIRUBIN_MULTIPLE,
+                    DEFAULT_HYS_WINDOW_DAYS)
+
+        multiples = [float(m) for m in
+                     re.findall(r"(\d+(?:\.\d+)?)\s*(?:×|x|\*)\s*ULN", text, re.IGNORECASE)]
+        window = re.search(r"within\s+(\d+)\s*days?", text, re.IGNORECASE)
+
+        enzyme = multiples[0] if len(multiples) >= 1 else DEFAULT_HYS_ENZYME_MULTIPLE
+        bilirubin = multiples[1] if len(multiples) >= 2 else DEFAULT_HYS_BILIRUBIN_MULTIPLE
+        days = int(window.group(1)) if window else DEFAULT_HYS_WINDOW_DAYS
+
+        if len(multiples) < 2 or window is None:
+            self.warnings.append(
+                f"{self.document_name} liver section did not yield both ULN multiples "
+                f"and a window; read {multiples!r} / {window and window.group(1)!r}, "
+                f"using {enzyme}x/{bilirubin}x/{days}d")
+        for name, read, default in (("enzyme multiple", enzyme, DEFAULT_HYS_ENZYME_MULTIPLE),
+                                    ("bilirubin multiple", bilirubin, DEFAULT_HYS_BILIRUBIN_MULTIPLE),
+                                    ("window days", days, DEFAULT_HYS_WINDOW_DAYS)):
+            if read != default:
+                # Not an error — an amendment is allowed to move a threshold.
+                # Recorded so a reviewer can see the rule actually changed.
+                self.warnings.append(
+                    f"{self.document_name}: {name} is {read}, was {default} in the practice "
+                    f"protocol — using the document, as required")
+        for w in self.warnings:
+            log.warning("%s", w)
+        return enzyme, bilirubin, days
+
+    def evidence_ref(self, section: int | str = 7) -> RecordRef:
+        """A citation pointing at the protocol section a rule came from."""
+        return RecordRef(domain="DOC", document=self.document_name, section=str(section))
+
+
 # ========================================================= finding detectors
 # Signature: (graph, site, usubjid, cut) -> list[Finding]
 #
@@ -604,6 +727,178 @@ def detector(code: str):
         DETECTORS[code] = fn
         return fn
     return register
+
+
+class LabValue:
+    """One laboratory record, standardised into the central unit.
+
+    `value` is None when the result was not usable as a number ("<5", "ND",
+    blank) — the record is still carried so a detector can say that a value was
+    skipped rather than silently pretending it never existed.
+    """
+
+    __slots__ = ("record", "testcd", "value", "unit", "converted", "date",
+                 "raw", "low", "high")
+
+    def __init__(self, record, testcd, value, unit, converted, date, raw, low, high):
+        self.record, self.testcd = record, testcd
+        self.value, self.unit, self.converted = value, unit, converted
+        self.date, self.raw = date, raw
+        self.low, self.high = low, high
+
+    def exceeds(self, multiple: float) -> bool:
+        return (self.value is not None and self.high is not None
+                and self.value > multiple * self.high)
+
+    def margin(self, multiple: float) -> float:
+        """How far past the threshold, as a fraction of it. 0.1 == 10% over."""
+        threshold = multiple * (self.high or 0)
+        if not threshold or self.value is None:
+            return 0.0
+        return (self.value - threshold) / threshold
+
+    def describe(self) -> str:
+        shown = f"{self.value:g} {self.unit}" if self.value is not None else f"{self.raw!r}"
+        if self.converted:
+            return f"{self.testcd} {self.raw} {self.record.get('LBORRESU')} = {shown}"
+        return f"{self.testcd} {shown}"
+
+
+def standardised_labs(graph: "StudyGraph", usubjid: str, cut: int | None,
+                      testcds: Iterable[str]) -> tuple[list[LabValue], int, int]:
+    """Every LB record for a subject in the given tests, in the central unit.
+
+    Returns (values, skipped_unusable, skipped_unit_mismatch). A unit that
+    matches no reference row means this record cannot be compared to a
+    threshold, so it is skipped here and reported separately by the
+    LAB_UNIT_MISMATCH detector — one bad record never takes a detector down.
+    """
+    wanted = {t.upper() for t in testcds}
+    out: list[LabValue] = []
+    unusable = mismatched = 0
+    for r in graph.records("LB", cut=cut, usubjid=usubjid):
+        testcd = (r.get("LBTESTCD") or "").strip().upper()
+        if testcd not in wanted:
+            continue
+        raw = graph.record_value(r, "LBORRES", cut)
+        try:
+            value, unit, converted = standardise_lab(testcd, raw, r.get("LBORRESU"), graph.ranges)
+            _low_unit, low, high = central_range(testcd, graph.ranges)
+        except UnitMismatch:
+            mismatched += 1
+            continue
+        except NoReferenceRange:
+            mismatched += 1
+            continue
+        date = graph.record_date(r, cut)
+        if value is None or date is None:
+            unusable += 1
+            if value is None:
+                continue
+        out.append(LabValue(r, testcd, value, unit, converted, date, raw, low, high))
+    return out, unusable, mismatched
+
+
+@detector("HYS_LAW_CANDIDATE")
+def detect_hys_law(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                   cut: int | None) -> list[Finding]:
+    """Potential Hy's law: a liver-enzyme rise and a bilirubin rise together.
+
+    Protocol §7: ALT or AST above N x ULN together with total bilirubin above
+    M x ULN within K days. N, M and K are read from the protocol version in
+    force at this cut, not fixed (ProtocolRules).
+
+    Every value passes through standardise_lab first. This is the case the gate
+    turns on: a local laboratory reporting in a different unit produces an ALT
+    that looks normal against the central range and is in fact four times the
+    upper limit. Comparing raw would miss it entirely.
+
+    Stated limitation: the protocol excludes cases "without cholestasis or
+    alternative explanation". Nothing in this schema measures cholestasis —
+    there is no ALP or GGT test in the reference ranges — so this detector
+    reports candidates, which is what the finding code says (HYS_LAW_*CANDIDATE*)
+    and what the protocol asks be sent for adjudication. It does not claim to
+    have ruled out an alternative explanation, and says so in its rationale.
+    """
+    rules = ProtocolRules(graph, cut)
+    findings: list[Finding] = []
+
+    subjects = ([usubjid] if usubjid else
+                [r["USUBJID"] for r in graph.records("DM", cut=cut, site=site)])
+
+    for subject in subjects:
+        labs, unusable, mismatched = standardised_labs(
+            graph, subject, cut, ("ALT", "AST", "BILI"))
+        enzymes = [lv for lv in labs if lv.testcd in ("ALT", "AST")
+                   and lv.exceeds(rules.hys_enzyme_multiple)]
+        bilirubins = [lv for lv in labs if lv.testcd == "BILI"
+                      and lv.exceeds(rules.hys_bilirubin_multiple)]
+        if not enzymes or not bilirubins:
+            continue
+
+        pairs = [(e, b) for e in enzymes for b in bilirubins
+                 if abs((e.date - b.date).days) <= rules.hys_window_days]
+        if not pairs:
+            continue
+
+        # Cite the clearest qualifying pair: closest in time, then largest
+        # margin over threshold. The records cited are the ones that show the
+        # finding, not merely ones that belong to the same subject (FR-9).
+        enzyme, bili = min(pairs, key=lambda p: (abs((p[0].date - p[1].date).days),
+                                                 -p[0].margin(rules.hys_enzyme_multiple)))
+        gap = abs((enzyme.date - bili.date).days)
+
+        enzyme_margin = enzyme.margin(rules.hys_enzyme_multiple)
+        bili_margin = bili.margin(rules.hys_bilirubin_multiple)
+        confidence = 0.92
+        caveats = []
+        # A value sitting within a few percent of its threshold is inside
+        # ordinary measurement noise — genuinely less certain, so it says so.
+        if min(enzyme_margin, bili_margin) < 0.05:
+            confidence = 0.62
+            caveats.append("a value is within measurement noise of its threshold")
+
+        # Values that had to be skipped (below detection, not done, unusable
+        # unit) deliberately do NOT lower confidence in a finding that was
+        # made. A skipped value can only ever hide a finding, never invent one:
+        # this pair qualified on its own two records, and an unrelated "<5" at a
+        # different visit says nothing about whether it did. Where skipped
+        # values genuinely matter is the opposite answer — "I found nothing" is
+        # less certain when some values could not be read — and that is carried
+        # on the empty answer instead (T1.21). They are still reported here, so
+        # the reader can see what was not usable.
+        if unusable or mismatched:
+            caveats.append(
+                f"{unusable} value(s) below detection or not done and "
+                f"{mismatched} with an unusable unit were skipped while scanning "
+                f"this subject; neither affects the pair cited above")
+
+        rationale = (
+            f"{enzyme.describe()} > {rules.hys_enzyme_multiple:g}x ULN "
+            f"({rules.hys_enzyme_multiple * enzyme.high:g} {enzyme.unit}) on {enzyme.date}, "
+            f"with {bili.describe()} > {rules.hys_bilirubin_multiple:g}x ULN "
+            f"({rules.hys_bilirubin_multiple * bili.high:g} {bili.unit}) on {bili.date} "
+            f"— {gap} day(s) apart, inside the {rules.hys_window_days}-day window "
+            f"({rules.document_name} §7).")
+        if enzyme.converted or bili.converted:
+            rationale += " Unit converted to the central laboratory's before comparison."
+        rationale += (" Candidate only: cholestasis and alternative explanations cannot be "
+                      "assessed from the available tests, so this is for adjudication.")
+        if caveats:
+            rationale += " Note: " + "; ".join(caveats) + "."
+
+        findings.append(Finding(
+            code="HYS_LAW_CANDIDATE",
+            usubjid=subject,
+            site=graph.site_for(subject),
+            severity="CRITICAL",
+            rationale=rationale,
+            evidence=[Atlas.ref(enzyme.record), Atlas.ref(bili.record), rules.evidence_ref(7)],
+            confidence=confidence,
+            protocol_version=rules.version,
+        ))
+    findings.sort(key=lambda f: f.usubjid or "")
+    return findings
 
 
 #: Hard ceiling per question (PRD FR-12/NFR-1). The harness scores a question
