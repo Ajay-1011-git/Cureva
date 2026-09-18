@@ -106,6 +106,39 @@ check("the discarded persona lost its vote, so the verdict is ESCALATE",
 check("both Round-2 challenges survived as structural claims",
       sum(1 for c in arb.surviving_claims if "->" in c) == 2)
 
+# --------------------------------------------------------------------------
+# A sequence-less domain, cited with a sequence number.
+#
+# Found during rehearsal: DM has no sequence column, so its records key at
+# seq=None and the detector cites them that way. The Round-1 schema example
+# showed "seq": 0, so every persona citing a DM record wrote 0 and Round 3
+# discarded all three claims as unsupported. They were correct claims. That is
+# the failure the PRD's own risk table names -- an evidence check that discards
+# valid claims -- so it is pinned here.
+# --------------------------------------------------------------------------
+print()
+dup = atlas.answer(Question(id="d", kind="finding", text="t",
+                            params={"code": "DUPLICATE_SUBJECT"}, cut=CUT)).findings
+if dup:
+    subject = dup[0].usubjid
+    print(f"  DM citations for {subject} (DM has no sequence column):")
+    for seq in (None, 0, 7):
+        got = atlas.verify_evidence(RecordRef(domain="DM", usubjid=subject, seq=seq),
+                                    code="DUPLICATE_SUBJECT", cut=CUT)
+        print(f"     seq={str(seq):5} -> {got}")
+    check("a DM citation verifies whatever sequence it carries, since there is "
+          "exactly one such row per subject",
+          all(atlas.verify_evidence(RecordRef(domain="DM", usubjid=subject, seq=q),
+                                    code="DUPLICATE_SUBJECT", cut=CUT)
+              for q in (None, 0, 7)))
+    check("the leniency is scoped: a wrong sequence on a sequenced domain still fails",
+          not atlas.verify_evidence(RecordRef(domain="LB", usubjid=finding.usubjid,
+                                              seq=99999),
+                                    code="HYS_LAW_CANDIDATE", cut=CUT))
+    check("and a real DM row still fails against a code it has nothing to do with",
+          not atlas.verify_evidence(RecordRef(domain="DM", usubjid=subject, seq=0),
+                                    code="HYS_LAW_CANDIDATE", cut=CUT))
+
 # Round 3 makes zero model calls. Assert it, rather than trusting the docstring.
 import inspect
 

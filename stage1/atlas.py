@@ -1660,8 +1660,21 @@ class Atlas:
             if not record_ref.domain or not record_ref.usubjid:
                 return False
 
-            record = self.graph.by_key.get(
-                (record_ref.domain.upper(), record_ref.usubjid, record_ref.seq))
+            domain = record_ref.domain.upper()
+            record = self.graph.by_key.get((domain, record_ref.usubjid, record_ref.seq))
+            if record is None and record_ref.seq is not None:
+                # A domain with no sequence column -- DM holds exactly one row
+                # per subject -- keys its records at seq=None. A citation that
+                # carries a sequence anyway still names that one row, and there
+                # is no ambiguity about which, so it verifies.
+                #
+                # This is narrow on purpose: the fallback only finds anything
+                # when a seq=None record genuinely exists for that subject and
+                # domain, so a wrong sequence on a sequenced domain (LB:x:9999)
+                # still fails. Without it, every DM citation was discarded --
+                # including correct ones, because the detector itself cites
+                # DM with seq=None.
+                record = self.graph.by_key.get((domain, record_ref.usubjid, None))
             if record is None:
                 return False
             if cut is not None and record["_cut"] > cut:
@@ -1677,12 +1690,17 @@ class Atlas:
                 # for a reason that has nothing to do with the claim.
                 return True
 
+            # Compare against the record the citation actually resolved to, not
+            # against the sequence number as written. They differ exactly when
+            # the fallback above fired, and in that case the resolved record is
+            # the one the citation meant.
+            resolved_seq = record.get("_seq")
             findings = detector(self.graph, None, record_ref.usubjid, cut) or []
             for finding in findings:
                 for ref in finding.evidence:
-                    if (ref.domain == record_ref.domain
+                    if (ref.domain == domain
                             and ref.usubjid == record_ref.usubjid
-                            and ref.seq == record_ref.seq):
+                            and ref.seq == resolved_seq):
                         return True
             return False
         except Exception:                                         # noqa: BLE001

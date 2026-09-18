@@ -20,7 +20,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from tribunal.client import ask_json, evidence_block, is_rate_limit
+from tribunal.client import (ask_json, citable_block, evidence_block,
+                             is_rate_limit)
 from tribunal.models import PERSONAS, Persona, PersonaVerdict
 
 log = logging.getLogger("cureva.tribunal.round1")
@@ -57,13 +58,15 @@ Answer with a single JSON object and nothing else:
 {
   "verdict": "ESCALATE" or "MONITOR",
   "reasoning": "two or three sentences, citing the specific field values you relied on",
-  "cited_evidence": [{"domain": "...", "usubjid": "...", "seq": 0}]
+  "cited_evidence": [ ... copied from CITABLE RECORDS below ... ]
 }
 
 Rules you must follow:
-- "cited_evidence" may only contain records listed in THE EVIDENCE below. Do not
-  invent a record, a subject id or a sequence number. If you rely on no specific
-  record, return an empty list.
+- "cited_evidence" may only contain entries copied EXACTLY from the CITABLE
+  RECORDS list below, including each one's "seq" value as written there --
+  including when it is null. Do not invent a record, a subject id or a
+  sequence number, and do not substitute 0 for a missing sequence. If you rely
+  on no specific record, return an empty list.
 - Quote real field values in your reasoning. Do not restate the rationale you
   were given as though it were your own finding.
 - ESCALATE means a human must make a decision about this now. MONITOR means it
@@ -87,6 +90,8 @@ def build_prompt(persona: Persona, finding: Any, graph: Any,
         f"WHAT THE DETECTOR REPORTED:\n{finding.rationale}\n\n"
         f"THE EVIDENCE (real records, values as they stand at this cut):\n"
         f"{evidence_block(finding, graph, cut)}\n\n"
+        f"CITABLE RECORDS (copy these verbatim into cited_evidence; nothing else "
+        f"is citable):\n{citable_block(finding)}\n\n"
         f"Give your own verdict."
     )
     return system, user

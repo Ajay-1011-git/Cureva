@@ -88,6 +88,27 @@ def is_rate_limit(exc: BaseException) -> bool:
     return "RateLimit" in name or "429" in text or "rate_limit_exceeded" in text
 
 
+def citable_block(finding: Any) -> str:
+    """The finding's evidence as exact JSON objects a persona can copy.
+
+    Rendering these separately from the human-readable evidence block fixes a
+    real failure found while rehearsing: the schema example showed `"seq": 0`,
+    so a persona citing a DM record -- a domain with no sequence column, whose
+    records key at seq=null -- dutifully wrote 0, and Round 3 discarded every
+    one of those claims as unsupported. They were correct claims. Giving the
+    model the literal objects to copy removes the guess entirely.
+    """
+    import json as _json
+    lines: list[str] = []
+    for ref in finding.evidence:
+        payload = {"domain": ref.domain, "usubjid": ref.usubjid, "seq": ref.seq}
+        if ref.document:
+            payload = {"domain": ref.domain, "document": ref.document,
+                       "section": ref.section}
+        lines.append("  " + _json.dumps(payload))
+    return "\n".join(lines) or "  (none)"
+
+
 def evidence_block(finding: Any, graph: Any, cut: int | None) -> str:
     """The finding's real records, rendered as fields rather than prose.
 
