@@ -53,6 +53,14 @@ TIMEOUT_SECONDS = 4.0
 #: TTS request limit, confirmed current on docs.sarvam.ai.
 TTS_MAX_CHARS = 2500
 
+#: The avatar's voice. Sarvam's docs list bulbul:v3's speakers but do not label
+#: them by gender; these six were each called live and confirmed to return
+#: valid audio. Cureva's avatar is presented as female, so the default is a
+#: female voice — "shubh", bulbul's own default, is male and was the wrong
+#: choice here. Override with SARVAM_TTS_SPEAKER to pick a different one.
+FEMALE_SPEAKERS = ("priya", "ritu", "neha", "kavya", "shreya", "suhani")
+DEFAULT_SPEAKER = os.environ.get("SARVAM_TTS_SPEAKER", "priya")
+
 
 class SarvamUnavailable(Exception):
     """STT/TTS could not complete — timeout, exhausted pool, or a hard error.
@@ -82,19 +90,38 @@ class SarvamClient:
     def __init__(self, pool: SarvamKeyPool | None = None):
         self.pool = pool or SarvamKeyPool()
 
-    def transcribe(self, audio_bytes: bytes, filename: str = "turn.wav") -> tuple[str, str]:
+    def transcribe(self, audio_bytes: bytes, filename: str = "turn.wav",
+                   content_type: str | None = None) -> tuple[str, str]:
         """Speech (any supported language) -> (english_transcript, detected_lang_code).
 
         Uses mode=translate so the transcript always comes back in English
         regardless of the spoken language — matching the multilingual-intake
         requirement (PRD NFR-5) without a separate translation step.
+
+        `content_type` must reflect what the bytes actually are. A browser's
+        MediaRecorder produces webm or mp4 depending on the engine, not wav,
+        and Sarvam rejects the upload outright when the declared type does not
+        match (it 400s with an explicit "Invalid file type" listing what it
+        accepts). It is threaded through from the caller rather than assumed;
+        the extension is kept in step with it for the same reason.
         """
+        # MediaRecorder hands back types like "audio/webm;codecs=opus" — the
+        # parameters are not part of the type Sarvam matches on.
+        ctype = (content_type or "audio/wav").split(";")[0].strip()
+        extension = {
+            "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "mp4",
+            "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav",
+            "audio/x-wav": "wav", "audio/wave": "wav",
+        }.get(ctype, "wav")
+        if "." in filename:
+            filename = f"{filename.rsplit('.', 1)[0]}.{extension}"
+
         def call(key: str) -> tuple[str, str]:
             try:
                 resp = requests.post(
                     STT_URL,
                     headers={"api-subscription-key": key},
-                    files={"file": (filename, audio_bytes, "audio/wav")},
+                    files={"file": (filename, audio_bytes, ctype)},
                     data={"model": "saaras:v3", "mode": "translate",
                           "language_code": "unknown"},
                     timeout=TIMEOUT_SECONDS,
@@ -121,11 +148,13 @@ class SarvamClient:
         except SarvamRateLimited as exc:
             raise SarvamUnavailable(f"STT: pool exhausted: {exc}") from exc
 
-    def speak(self, text: str, lang: str = "en-IN", speaker: str = "shubh") -> bytes:
+    def speak(self, text: str, lang: str = "en-IN",
+              speaker: str | None = None) -> bytes:
         """Text -> decoded WAV bytes. Truncates to TTS_MAX_CHARS rather than
         raising — a slightly-clipped reply keeps the demo alive; a raised
         exception over a length limit would not."""
         clipped = text[:TTS_MAX_CHARS]
+        voice = speaker or DEFAULT_SPEAKER
 
         def call(key: str) -> bytes:
             try:
@@ -133,7 +162,7 @@ class SarvamClient:
                     TTS_URL,
                     headers={"api-subscription-key": key, "Content-Type": "application/json"},
                     json={"text": clipped, "target_language_code": lang,
-                          "model": "bulbul:v3", "speaker": speaker},
+                          "model": "bulbul:v3", "speaker": voice},
                     timeout=TIMEOUT_SECONDS,
                 )
             except requests.RequestException as exc:

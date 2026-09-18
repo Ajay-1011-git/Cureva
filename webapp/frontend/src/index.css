@@ -97,3 +97,22 @@ body { background: var(--bg); color: var(--text); }
 
 .atlas-subject-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 18px; color: var(--muted); font-size: 0.85rem; }
 .atlas-subject-row input { padding: 5px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 0.85rem; width: 160px; }
+
+/* --------------------------------------------------------------- mic */
+.mic-button {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  font-size: 0.9rem; white-space: nowrap;
+}
+.mic-button:hover:not(:disabled) { border-color: var(--accent); }
+.mic-button:disabled { opacity: 0.5; cursor: default; }
+.mic-button .mic-dot {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--muted);
+}
+.mic-button.recording { border-color: var(--danger); color: var(--danger); }
+.mic-button.recording .mic-dot { background: var(--danger); animation: mic-pulse 1s ease-in-out infinite; }
+@keyframes mic-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(1.35); } }
+.mic-notice {
+  font-size: 0.8rem; color: var(--accent-warm); margin-bottom: 6px;
+}

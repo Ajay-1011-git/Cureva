@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
 import AvatarCanvas from '../avatar/AvatarCanvas.jsx'
 import FindingGraphPanel from '../components/FindingGraphPanel.jsx'
+import MicButton from '../components/MicButton.jsx'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -22,6 +23,7 @@ export default function Atlas() {
   // VITE_DEMO_SUBJECT so nothing is pinned to one practice-study id — the
   // default is just a subject that has a real finding to show, which makes
   // the demo's cause-and-effect visible without hunting for one live.
+  const [micNotice, setMicNotice] = useState(null)
   const [usubjid, setUsubjid] = useState(
     import.meta.env.VITE_DEMO_SUBJECT || '042-S07-001')
   const audioRef = useRef(null)
@@ -46,7 +48,12 @@ export default function Atlas() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
 
-      setMessages((m) => [...m, { role: 'patient', text: payload.text ?? '(spoken)' },
+      // For a spoken turn, show what was actually transcribed — not a generic
+      // "(spoken)" placeholder. If the transcription misheard you, that has to
+      // be visible or the conversation is impossible to debug live.
+      const heard = payload.text
+        ?? (data.transcript ? `🎤 ${data.transcript}` : '🎤 (nothing heard)')
+      setMessages((m) => [...m, { role: 'patient', text: heard },
         { role: 'avatar', text: data.reply_text, extracted: data.extracted }])
       setGesture(data.gesture)
       setDegraded(Boolean(data.degraded))
@@ -80,6 +87,12 @@ export default function Atlas() {
     setGraphVersion((v) => v + 1)      // trigger a finding-graph re-poll
   }
 
+  const handleClip = async (audio_b64, audio_mime) => {
+    if (busy) return
+    await sendTurn({ audio_b64, audio_mime })
+    setGraphVersion((v) => v + 1)
+  }
+
   return (
     <div className="atlas-page">
       <h1>Atlas</h1>
@@ -103,16 +116,20 @@ export default function Atlas() {
               </div>
             ))}
           </div>
+          {micNotice && <div className="mic-notice">{micNotice}</div>}
           <div className="chat-input-row">
+            <MicButton onClip={handleClip} disabled={busy}
+                       onUnavailable={setMicNotice} />
             <input
               type="text"
-              placeholder="Describe a symptom or medication…"
+              placeholder="Speak, or type a symptom or medication…"
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               disabled={busy}
             />
-            <button onClick={handleSend} disabled={busy || !text.trim()}>
+            <button onClick={handleSend} disabled={busy || !text.trim()}
+                    data-testid="send-button">
               {busy ? '…' : 'Send'}
             </button>
           </div>

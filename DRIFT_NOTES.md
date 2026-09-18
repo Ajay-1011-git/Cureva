@@ -202,3 +202,58 @@ conditional anywhere in `stage1/`, `study.py`, `intake/` or `graph/`. An
 AST-aware scan (excluding docstrings and comments, which are allowed to cite
 worked examples) found exactly one hit, and it is in the organiser's own
 unmodified `study.py` `main()` demo print.
+
+## 8. The /atlas page shipped mute — what was missing and why
+
+Reported as "I can't communicate with the avatar; the prompt didn't even
+work." Three separate causes, all real:
+
+1. **A stale `.env.local` broke every request.** During T1.32's own testing I
+   created `webapp/frontend/.env.local` with `VITE_API_BASE=http://localhost:8020`
+   — a throwaway port. It is gitignored, so it never appeared in a commit, but
+   it sat on disk overriding the API base while `run_stage1.sh serve` starts
+   the backend on **8000**. Every fetch from the page went to a dead port and
+   failed silently. Deleted; the page now falls back to `:8000`, and
+   `webapp/frontend/.env.example` documents the override for anyone who needs it.
+
+2. **There was no microphone at all.** T1.32's spec says "mic button + text
+   fallback"; only the text half was built. `src/components/MicButton.jsx` now
+   records with `MediaRecorder`, stops itself at 25s (Sarvam's REST limit is
+   30s), reports a denied-permission or unsupported-browser case in words
+   instead of leaving a dead button, and hands the clip up as base64.
+
+3. **The spoken path could never have worked even with a mic.** `transcribe()`
+   hard-coded `Content-Type: audio/wav`, but a browser's `MediaRecorder`
+   produces `audio/webm` (Chrome), `audio/mp4` (Safari) or `audio/ogg`
+   (Firefox). Sarvam rejects a mismatched declared type outright — HTTP 400,
+   "Invalid file type" — which is the same failure already hit once in T1.25
+   and fixed only for the wav case. The recorded type is now threaded from the
+   browser through `/api/atlas/avatar-turn` into `transcribe()`, with the
+   filename extension kept in step and codec parameters
+   (`audio/webm;codecs=opus`) stripped before sending.
+
+Two further corrections made at the same time:
+
+- **The voice was male.** `speak()` defaulted to `shubh`, which is bulbul's own
+  default and a male voice, while Cureva's avatar is presented as female. Six
+  candidate female speakers were each called live and confirmed to return valid
+  audio (`priya`, `ritu`, `neha`, `kavya`, `shreya`, `suhani`); the default is
+  now `priya` and `SARVAM_TTS_SPEAKER` overrides it. Sarvam's docs list speaker
+  names but do not label them by gender, which is why this was verified by
+  calling rather than by reading.
+- **A spoken turn now echoes its transcript.** The response carries
+  `transcript`, and the page shows what was actually heard rather than a
+  generic "(spoken)". A mis-transcription is the most confusing failure mode in
+  a voice interface; hiding it makes a live demo undebuggable. Silence is
+  answered with "I didn't catch that" rather than being sent to Groq as an
+  empty prompt.
+
+`tests/test_t1_32_voice_path.py` locks all of this down deterministically (no
+network, no credentials): mime/extension handling per browser, codec-parameter
+stripping, `mode=translate`, the female-voice default, multi-chunk TTS joining,
+transcript echo for spoken turns vs `null` for typed ones, and the
+silence-guard.
+
+Also: **`/monitor` and `/watch` are no longer in the nav.** The routes still
+resolve so a deep link doesn't 404, but they are not advertised while Stage 1
+is the whole product.

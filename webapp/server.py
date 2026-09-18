@@ -102,9 +102,19 @@ class AvatarTurnRequest(BaseModel):
     #: subject a PRO record belongs to. Optional; defaults to a placeholder
     #: demo subject id that can never collide with a real USUBJID.
     usubjid: str | None = None
+    #: What `audio_b64` actually is. A browser's MediaRecorder produces webm
+    #: or mp4 depending on the engine; Sarvam rejects an upload whose declared
+    #: type does not match the bytes, so the client sends what it recorded
+    #: rather than letting the server assume wav.
+    audio_mime: str | None = None
 
 
 class AvatarTurnHTTPResponse(BaseModel):
+    #: What the system actually heard, when the turn came in as audio. The
+    #: page shows this back to the patient — a transcription that misheard
+    #: you is the single most confusing failure in a voice interface, and
+    #: hiding it behind "(spoken)" makes it undebuggable during a live demo.
+    transcript: str | None = None
     reply_text: str
     reply_lang: str
     gesture: str
@@ -188,8 +198,19 @@ def avatar_turn(req: AvatarTurnRequest) -> AvatarTurnHTTPResponse:
         else:
             try:
                 audio_bytes = base64.b64decode(req.audio_b64)
-                patient_text, detected_lang = sarvam.transcribe(audio_bytes)
+                patient_text, detected_lang = sarvam.transcribe(
+                    audio_bytes, content_type=req.audio_mime)
                 lang_hint = lang_hint or detected_lang
+                if not patient_text.strip():
+                    # Transcription succeeded but heard nothing usable (silence,
+                    # a stray tap). Say so rather than sending an empty string
+                    # to Groq and getting a confused reply back.
+                    return AvatarTurnHTTPResponse(
+                        transcript="",
+                        reply_text="I didn't catch that — could you say it again?",
+                        reply_lang="en-IN", gesture="listening",
+                        reply_audio_b64=None, extracted=[], pro_written=[],
+                        degraded=False)
             except SarvamUnavailable as exc:
                 log.warning("Sarvam STT failed: %s", exc)
                 degraded = True
@@ -263,6 +284,7 @@ def avatar_turn(req: AvatarTurnRequest) -> AvatarTurnHTTPResponse:
         degraded = True
 
     return AvatarTurnHTTPResponse(
+        transcript=patient_text if req.audio_b64 is not None else None,
         reply_text=turn.reply_text, reply_lang=turn.reply_lang, gesture=turn.gesture,
         reply_audio_b64=reply_audio_b64,
         extracted=[e.model_dump(mode="json") for e in turn.extracted],
