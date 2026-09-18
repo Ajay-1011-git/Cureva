@@ -185,6 +185,12 @@ OFFLINE_TESTS=(
   tests/test_t1_24_sarvam_pool.py     tests/test_t1_26_groq_contract.py
   tests/test_t1_28_finding_graph.py   tests/test_t1_32_voice_path.py
   tests/test_t1_33_clinical_intake.py
+  # The review-cycle layer and Act 3. Offline: the arbitration and
+  # rate-limit tests simulate their failure modes rather than firing real
+  # calls, so `quick` runs them too.
+  tests/test_t2_10_trace.py           tests/test_t2_11_idempotency.py
+  tests/test_t2_15_arbitration.py     tests/test_t2_17_rate_limit.py
+  tests/test_evidence_integrity.py
 )
 
 # These touch the real Sarvam API or spin up the backend in-process. They are
