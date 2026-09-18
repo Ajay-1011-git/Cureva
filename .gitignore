@@ -22,3 +22,6 @@ Hackathon_Docs/
 # planning/build documents and the organiser's own doc bundle — local only
 instructions/
 *instructions.zip
+
+# organiser dataset archive
+hackathon-data*.zip
