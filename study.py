@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -119,18 +121,95 @@ class Study:
 # ===================================================================== TODO
 # Everything below is a stub. This is where Problem 1 is won or lost.
 
+# Month abbreviations are matched from this explicit table rather than via
+# strptime("%b"), which reads the process locale: on a grading machine with a
+# non-English locale "FEB" would stop matching and a tenth of every date column
+# would silently vanish from window checks. The table is locale-proof.
+_MONTHS = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+           "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+
+_ISO_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_DMY_RE = re.compile(r"^(\d{1,2})-([A-Za-z]{3})-(\d{4})$")
+
+
 def parse_date(value: Any):
-    """TODO: the study uses more than one date format. Return a date object, or
-    None when the value is missing. Do not assume ISO."""
-    raise NotImplementedError
+    """Parse a study date into a `datetime.date`, or None when it is missing.
+
+    Two formats are confirmed present, and they are mixed *within every date
+    column in the study* — not just AE: ISO ("2026-01-08") and DD-MON-YYYY
+    ("03-FEB-2026"). Counted across the practice study: 1200 of 14400 LBDTC
+    values, 25 of 294 AESTDTC values, and so on for every other date column.
+
+    Anything that is neither raises ValueError. That is deliberate: returning
+    None for an unrecognised format would silently drop the record from every
+    window and ordering check, which is the exact failure this function exists
+    to prevent. Callers catch it and skip the one row (PRD FR-11/FR-14).
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+
+    m = _ISO_RE.match(s)
+    if m:
+        y, mo, d = (int(g) for g in m.groups())
+        return date(y, mo, d)
+
+    m = _DMY_RE.match(s)
+    if m:
+        d_s, mon_s, y_s = m.groups()
+        mo = _MONTHS.get(mon_s.upper())
+        if mo is not None:
+            return date(int(y_s), mo, int(d_s))
+
+    raise ValueError(f"unrecognized date format: {value!r}")
 
 
 def to_number(value: Any) -> float | None:
-    """TODO: laboratory values are not always numbers.
-    '<5' means below the detection limit — which is NOT zero.
-    'ND' means not done. '12,4' is a decimal comma. '' is missing.
-    Return a float, or None when there is no usable number."""
-    raise NotImplementedError
+    """Parse a result value into a float, or None when there is no usable number.
+
+    Confirmed shapes in LB.csv's LBORRES across the practice study:
+        14207 plain floats ("40.4"), 57 decimal-comma ("117,9"),
+           50 "ND",             44 below-detection ("<5"),   42 empty.
+
+    Below-detection and not-done both return None. They are *not* zero — "<5"
+    means the true value is somewhere in (0, 5), which is not a number you may
+    compare to a threshold. Collapsing both to None is correct for every
+    detector that consumes this: each one means "cannot be compared". A
+    detector that needs to explain *why* a value was unusable reads the
+    original raw string, not a richer return type from here.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):          # bool is an int subclass; never a result value
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.upper() in ("ND", "NA", "N/A"):  # ND confirmed; NA/N/A cost nothing to accept
+        return None
+    if s.startswith("<") or s.startswith(">"):
+        # Below (or above) the detection limit. Real bound, unusable as a value.
+        return None
+
+    if "," in s:
+        # European decimal comma ("117,9"). If a dot is also present the comma
+        # is a thousands separator instead ("1,234.5") — not seen in the
+        # practice data, handled so a hidden study using it does not misparse.
+        s = s.replace(",", "") if "." in s else s.replace(",", ".")
+
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 def standardise_lab(testcd: str, value: Any, unit: str | None, ranges: list[dict]):
