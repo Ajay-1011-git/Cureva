@@ -1,0 +1,34 @@
+# Cureva — Stage 1 (Atlas)
+# The graded path (stage1/atlas.py, study.py, schemas.py) needs ONLY pydantic.
+# Everything below the first block is demo-layer only (intake/, graph/, webapp/)
+# and is never imported by stage1/atlas.py — see cureva-stage1-trd.md §2.
+
+# --- graded path ---------------------------------------------------------
+pydantic>=2
+
+# --- demo layer: backend --------------------------------------------------
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+
+# --- demo layer: Act 2 finding graph -------------------------------------
+networkx
+
+# --- demo layer: Act 1 avatar intake -------------------------------------
+groq
+# `sarvamai` is Sarvam's official Python SDK (used for bulbul:v3 TTS per
+# build-instructions §B.4). T1.25 re-confirms the package name and the current
+# request/response shape against docs.sarvam.ai before writing request code;
+# if the SDK is unavailable, that task falls back to `requests` against the
+# REST endpoints and records the substitution in a code comment.
+sarvamai
+requests
+
+# --- one-time load/normalisation -----------------------------------------
+# pandas is listed by the architecture doc for the one-time load pass. It is
+# NOT currently imported anywhere: study.Study already loads every CSV with
+# csv.DictReader, and StudyGraph indexes those dicts directly (TRD §3 permits
+# either, "pandas only if it earns its keep"). Kept here so the documented
+# stack installs cleanly; drop it if it is still unused at Stage 3.
+pandas

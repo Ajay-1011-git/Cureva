@@ -1,0 +1,154 @@
+{
+ "note": "Public practice questions. The hidden bank has 40 and includes the mid-stage change.",
+ "study": "STUDY-042",
+ "seed": "public",
+ "questions": [
+  {
+   "id": "Q001",
+   "kind": "count",
+   "text": "How many subjects at site S11 discontinued due to an adverse event?",
+   "params": {
+    "metric": "discontinued_ae",
+    "site": "S11"
+   },
+   "_answer": 3,
+   "_weight": 1.0
+  },
+  {
+   "id": "Q002",
+   "kind": "count",
+   "text": "How many subjects at site S02 discontinued due to an adverse event?",
+   "params": {
+    "metric": "discontinued_ae",
+    "site": "S02"
+   },
+   "_answer": 0,
+   "_weight": 1.0
+  },
+  {
+   "id": "Q003",
+   "kind": "count",
+   "text": "How many subjects at site S01 discontinued due to an adverse event?",
+   "params": {
+    "metric": "discontinued_ae",
+    "site": "S01"
+   },
+   "_answer": 1,
+   "_weight": 1.0
+  },
+  {
+   "id": "Q013",
+   "kind": "lookup",
+   "text": "List the lab and adverse-event records for subject 042-S07-001 within 7 days of the WEEK12 visit.",
+   "params": {
+    "usubjid": "042-S07-001",
+    "domains": [
+     "LB",
+     "AE"
+    ],
+    "around_visit": "WEEK12",
+    "window_days": 7
+   },
+   "_answer": [
+    "LB:042-S07-001:31",
+    "LB:042-S07-001:32",
+    "LB:042-S07-001:33",
+    "LB:042-S07-001:34",
+    "LB:042-S07-001:35",
+    "LB:042-S07-001:36"
+   ],
+   "_weight": 1.5
+  },
+  {
+   "id": "Q014",
+   "kind": "lookup",
+   "text": "List the lab and adverse-event records for subject 042-S08-014 within 7 days of the WEEK12 visit.",
+   "params": {
+    "usubjid": "042-S08-014",
+    "domains": [
+     "LB",
+     "AE"
+    ],
+    "around_visit": "WEEK12",
+    "window_days": 7
+   },
+   "_answer": [
+    "LB:042-S08-014:31",
+    "LB:042-S08-014:32",
+    "LB:042-S08-014:33",
+    "LB:042-S08-014:34",
+    "LB:042-S08-014:35",
+    "LB:042-S08-014:36"
+   ],
+   "_weight": 1.5
+  },
+  {
+   "id": "Q018",
+   "kind": "finding",
+   "text": "Which subjects meet potential Hy's law criteria?",
+   "params": {
+    "code": "HYS_LAW_CANDIDATE"
+   },
+   "_answer": [
+    "042-S05-003",
+    "042-S07-001",
+    "042-S08-014"
+   ],
+   "_weight": 3.0
+  },
+  {
+   "id": "Q019",
+   "kind": "finding",
+   "text": "Which subjects have an adverse event that starts before their first dose?",
+   "params": {
+    "code": "AE_BEFORE_FIRST_DOSE"
+   },
+   "_answer": [
+    "042-S02-010",
+    "042-S02-015",
+    "042-S03-016",
+    "042-S07-016",
+    "042-S09-010",
+    "042-S09-013",
+    "042-S10-012",
+    "042-S11-005"
+   ],
+   "_weight": 2.0
+  },
+  {
+   "id": "Q020",
+   "kind": "finding",
+   "text": "Is any subject enrolled at more than one site?",
+   "params": {
+    "code": "DUPLICATE_SUBJECT"
+   },
+   "_answer": [
+    "042-S02-013",
+    "042-S05-021"
+   ],
+   "_weight": 2.5
+  },
+  {
+   "id": "Q028",
+   "kind": "trap",
+   "text": "Which subjects at site S10 meet Hy's law criteria?",
+   "params": {
+    "code": "HYS_LAW_CANDIDATE",
+    "site": "S10"
+   },
+   "_answer": [],
+   "_weight": 2.0
+  },
+  {
+   "id": "Q029",
+   "kind": "trap",
+   "text": "Which subjects at site S01 meet Hy's law criteria?",
+   "params": {
+    "code": "HYS_LAW_CANDIDATE",
+    "site": "S01"
+   },
+   "_answer": [],
+   "_weight": 2.0
+  }
+ ]
+}
