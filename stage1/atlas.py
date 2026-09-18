@@ -1340,6 +1340,87 @@ class Atlas:
                 f" [took {elapsed:.1f}s, over the {TIME_LIMIT_SECONDS:.0f}s limit]"
         return result
 
+    # ------------------------------------------------------------ T2.15
+    def verify_evidence(self, record_ref: RecordRef, claim: str | None = None,
+                        *, code: str | None = None,
+                        cut: int | None = "unset") -> bool:
+        """Does this cited record exist, and does it still support the claim?
+
+        Additive. Nothing that existed before this method was changed to add
+        it: no signature, no detector, no dispatch path.
+
+        Act 3's Round 3 calls this to throw out claims a persona made about
+        records that do not say what the persona said they say. Two checks,
+        in order:
+
+        1. **Existence at the cut.** A record that is not in the graph, or that
+           is not visible yet at this cut, cannot support anything. A document
+           reference is verified against the documents actually loaded.
+        2. **The code's own predicate, when `code` is given.** This does not
+           re-implement any detector -- it *runs* the registered detector for
+           that code, scoped to the cited subject and cut, and asks whether the
+           detector itself still cites this record. That is the point: the only
+           trustworthy answer to "does this record support a HYS_LAW_CANDIDATE
+           claim" is the one Stage 1's own Hy's law detector gives, so the
+           check reuses it wholesale rather than approximating it.
+
+        `claim` is accepted for the signature the TRD specifies and is not used
+        to second-guess the detector. Judging free text against a record is
+        exactly the kind of inference Round 3 exists to avoid making -- Round 3
+        is deterministic precisely because it never asks a model, or this
+        method, to interpret prose.
+
+        Never raises: a verification that cannot be completed is a verification
+        that did not pass.
+        """
+        try:
+            if cut == "unset":
+                cut = self.graph.cut
+
+            # A document/section citation: the document must really be loaded,
+            # and a named section must really be in it.
+            if record_ref.document:
+                try:
+                    text = self.graph.document(record_ref.document)
+                except Exception:                                 # noqa: BLE001
+                    return False
+                if not text:
+                    return False
+                if record_ref.section is None:
+                    return True
+                return bool(protocol_section(text, record_ref.section))
+
+            if not record_ref.domain or not record_ref.usubjid:
+                return False
+
+            record = self.graph.by_key.get(
+                (record_ref.domain.upper(), record_ref.usubjid, record_ref.seq))
+            if record is None:
+                return False
+            if cut is not None and record["_cut"] > cut:
+                return False            # exists, but not visible yet at this cut
+
+            if code is None:
+                return True             # existence was all that was asked
+
+            detector = self.detectors.get(code)
+            if detector is None:
+                # No detector claims this code, so there is no predicate to
+                # check. The record exists; say so, rather than failing a claim
+                # for a reason that has nothing to do with the claim.
+                return True
+
+            findings = detector(self.graph, None, record_ref.usubjid, cut) or []
+            for finding in findings:
+                for ref in finding.evidence:
+                    if (ref.domain == record_ref.domain
+                            and ref.usubjid == record_ref.usubjid
+                            and ref.seq == record_ref.seq):
+                        return True
+            return False
+        except Exception:                                         # noqa: BLE001
+            return False
+
     # --------------------------------------------------------- kind handlers
     def _answer_count(self, question: Question, deadline: float) -> Answer:
         params = dict(question.params or {})
