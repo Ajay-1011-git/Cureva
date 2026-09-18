@@ -95,10 +95,15 @@ doctor() {
     amber "  note  .env        absent — the graded path still runs; the avatar won't"
   fi
 
-  if [ -d webapp/frontend/node_modules ]; then
+  if [ -x webapp/frontend/node_modules/.bin/vite ]; then
     green "  ok    frontend    node_modules installed"
-  else
+  elif [ -d webapp/frontend/node_modules ]; then
+    amber "  note  frontend    node_modules present but vite missing → ./run_stage1.sh setup"
+  elif command -v npm >/dev/null 2>&1; then
     amber "  note  frontend    node_modules missing → ./run_stage1.sh setup (needed only for serve)"
+  else
+    amber "  note  frontend    node/npm not installed → brew install node, then ./run_stage1.sh setup"
+    amber "                    (needed only for serve; the graded path and all tests run without it)"
   fi
 
   if [ -f webapp/frontend/public/avatar.glb ]; then
@@ -290,7 +295,32 @@ start_backend() {
   "$VENV/uvicorn" webapp.server:app --port "$BACKEND_PORT" &
   BACKEND_PID=$!
 }
+# Returns non-zero, with an explanation, when the frontend cannot start.
+# Checked before launching rather than after, because the bare shell error
+# ("./node_modules/.bin/vite: No such file or directory") names a path and not
+# the thing to do about it.
+check_frontend_ready() {
+  if [ ! -d webapp/frontend/node_modules ]; then
+    red "  frontend dependencies are not installed."
+    if command -v npm >/dev/null 2>&1; then
+      dim  "  Fix:  ./run_stage1.sh setup        (npm is available)"
+    else
+      red  "  node/npm is not installed on this machine either."
+      dim  "  Fix:  brew install node   &&   ./run_stage1.sh setup"
+      dim  "  The graded path and every test run without it; only serve needs it."
+    fi
+    return 1
+  fi
+  if [ ! -x webapp/frontend/node_modules/.bin/vite ]; then
+    red "  node_modules exists but vite is missing or not executable."
+    dim "  Fix:  ./run_stage1.sh setup      (re-installs frontend dependencies)"
+    return 1
+  fi
+  return 0
+}
+
 start_frontend() {
+  check_frontend_ready || return 1
   header "Frontend — http://localhost:$FRONTEND_PORT"
   # --strictPort so a busy port is an error rather than a silent move to
   # 5174. After free_ports() the port is ours; if it somehow is not, saying
@@ -361,6 +391,9 @@ case "$MODE" in
 
   serve)
     free_ports
+    # Checked before the backend starts, so a missing frontend does not leave
+    # a half-served demo and an orphaned uvicorn behind.
+    check_frontend_ready || exit 1
     start_backend; sleep 2; start_frontend
     echo
     green "  Backend   http://localhost:$BACKEND_PORT/api/health"
