@@ -473,9 +473,92 @@ class StudyGraph:
         return earliest
 
 
-class Atlas:
-    def __init__(self, graph: StudyGraph):
-        raise NotImplementedError("T1.6")
+#: Hard ceiling per question (PRD FR-12/NFR-1). The harness scores a question
+#: that breaches it as zero regardless of correctness, so a slow-but-right
+#: answer is worth less than a fast partial one — hence the soft budget below.
+TIME_LIMIT_SECONDS = 120.0
+#: Where answer() stops gathering and returns what it already has.
+SOFT_BUDGET_SECONDS = 100.0
 
+
+class Atlas:
+    """Answers one question at a time against a built StudyGraph.
+
+    Four question kinds, three code paths. "trap" is deliberately NOT a code
+    path of its own: a trap is a finding-kind question whose true answer happens
+    to be empty, so it runs the same detector as any other finding question and
+    the honesty lives in the detector returning [] when that is the truth. Any
+    special "is this a trick?" handling would be exactly the reflex the traps
+    are there to catch — and would be unavailable on the hidden set, where
+    nothing labels a question as a trap in advance.
+    """
+
+    def __init__(self, graph: StudyGraph):
+        self.graph = graph
+        # Registries are filled in by the tasks that own them (T1.7 count
+        # metrics, T1.9 finding detectors). Declared here so dispatch can be
+        # written once and never touched again as detectors are added.
+        self.metrics: dict[str, Any] = {}
+        self.detectors: dict[str, Any] = {}
+        self._register_metrics()
+        self._register_detectors()
+
+    # ------------------------------------------------------------ registries
+    def _register_metrics(self) -> None:
+        """Populated in T1.7."""
+
+    def _register_detectors(self) -> None:
+        """Populated in T1.9-T1.19."""
+
+    # -------------------------------------------------------------- dispatch
     def answer(self, question: Question) -> Answer:
-        raise NotImplementedError("T1.6")
+        """Answer one question. Never raises.
+
+        A crash inside one metric or detector becomes a low-confidence, empty,
+        schema-valid Answer explaining what went wrong (PRD FR-11). The grader
+        scores an exception as zero for that question either way, but an Answer
+        keeps the remaining questions running and leaves a readable reason
+        behind instead of a stack trace.
+        """
+        started = time.perf_counter()
+        deadline = started + SOFT_BUDGET_SECONDS
+        try:
+            if question.kind == "count":
+                result = self._answer_count(question, deadline)
+            elif question.kind == "lookup":
+                result = self._answer_lookup(question, deadline)
+            elif question.kind in ("finding", "trap"):
+                result = self._answer_finding(question, deadline)
+            else:
+                result = Answer(
+                    question_id=question.id, answer=None, confidence=0.0,
+                    text=f"unsupported question kind {question.kind!r}")
+        except Exception as exc:                       # noqa: BLE001 - never raise
+            result = Answer(
+                question_id=question.id, answer=None, confidence=0.0,
+                text=f"could not answer: {type(exc).__name__}: {exc}")
+
+        result.question_id = question.id
+        elapsed = time.perf_counter() - started
+        if elapsed > TIME_LIMIT_SECONDS:
+            # Already over; say so rather than let a stale answer look clean.
+            result.text = (result.text + " ").strip() + \
+                f" [took {elapsed:.1f}s, over the {TIME_LIMIT_SECONDS:.0f}s limit]"
+        return result
+
+    # --------------------------------------------------------- kind handlers
+    def _answer_count(self, question: Question, deadline: float) -> Answer:
+        params = dict(question.params or {})
+        name = params.pop("metric", None)
+        metric = self.metrics.get(name)
+        if metric is None:
+            return Answer(
+                question_id=question.id, answer=None, confidence=0.0,
+                text=f"no metric named {name!r}; known metrics: {sorted(self.metrics) or 'none'}")
+        return metric(self, question, params, deadline)
+
+    def _answer_lookup(self, question: Question, deadline: float) -> Answer:
+        raise NotImplementedError("T1.8")
+
+    def _answer_finding(self, question: Question, deadline: float) -> Answer:
+        raise NotImplementedError("T1.9")
