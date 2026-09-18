@@ -16,18 +16,23 @@ check the troubleshooting section rather than improvising.
 ./run.sh serve       # backend :8000 + frontend :5173
 ```
 
-Open **http://localhost:5173/monitor** and press **Reset**.
+Open **http://localhost:5173/monitor**.
 
-Three things to check before an audience sees it:
+That is the whole setup. Every `./run.sh serve` starts a clean study — the
+server's state is session-scoped, so you do not have to remember to reset
+anything. Memory is still fully live *inside* the session, which is what Act 5
+depends on.
 
-- **Reset really is pressed.** Memory is persistent and working: if you demoed
-  earlier, the gate will correctly be empty and you will have nothing to show.
-  This is the one setup step that ruins the demo if skipped.
+Two things to check before an audience sees it:
+
 - **Warm the debate.** The free tier throttles on *tokens per minute*, and one
   deliberation costs ~7.2k against an 8000 ceiling. Run one debate privately
   before you start so you know the window is clear, then leave ~a minute before
   the live one.
 - **Have a second terminal** open at the repo root for the closing run.
+
+The **Reset** button is still there for restaging mid-demo — you have answered
+a gate full of escalations and want them back without dropping the server.
 
 ---
 
@@ -225,7 +230,7 @@ identical escalation-worthy set: True (108 vs 108)
 
 | Symptom | Cause | Do this |
 |---|---|---|
-| Gate is empty after Run cycle | Memory from an earlier run — working as designed | Press **Reset**, run again |
+| Gate is empty after Run cycle | You already answered these in this session | Press **Reset** (or restart `serve`) |
 | Debate says "timed out" or "rate limit" | Tokens-per-minute ceiling; one deliberation ≈ 7.2k of 8000 | Wait a minute. Say so out loud — it is the designed degradation and Act 7 is about exactly this |
 | Debate panel says no deliberation ran | That finding was never deliberated | Use **debate this** on the row |
 | Page will not load | Frontend deps missing | `./run.sh setup`, then `./run.sh serve` |

@@ -410,8 +410,29 @@ def health() -> dict:
 # all — study.escalate() always replies inline — and it is what makes the human
 # gate a gate rather than a read-only list. The graded path is unaffected; it
 # constructs its own crew with the default "auto" mode.
+#: Where the server's own crew keeps its state. Deliberately NOT the default
+#: `state/` the graded path uses.
+#:
+#: Memory persisting across restarts is a real requirement and the graded crew
+#: keeps it: an escalation answered once is never raised again, forever. But
+#: that is a property of one review *process*, and a browser session is not
+#: that process. Sharing one directory meant a second demo correctly opened
+#: with an empty gate and nothing to show — the guarantee working exactly as
+#: designed, and ruining the thing it was supposed to demonstrate.
+#:
+#: So the server's state is session-scoped and cleared when the process starts.
+#: Inside a session memory is fully live, which is the point: you can run a cut
+#: twice and watch it raise nothing. Restart, and you get a clean study again.
+#: The same split the finding graph above already makes for the same reason.
+SESSION_STATE_DIR = "state/session"
+
 _crew = None
 _crew_error: str | None = None
+
+
+def _clear_session_state() -> None:
+    import shutil
+    shutil.rmtree(SESSION_STATE_DIR, ignore_errors=True)
 
 
 def _get_crew():
@@ -419,12 +440,18 @@ def _get_crew():
     if _crew is None and _crew_error is None:
         try:
             from stage2 import ReviewCrew
-            _crew = ReviewCrew(DATA_DIR, _atlas, tribunal=True, tribunal_budget=1,
+            _crew = ReviewCrew(DATA_DIR, _atlas, state_dir=SESSION_STATE_DIR,
+                               tribunal=True, tribunal_budget=1,
                                human_gate="defer")
         except Exception as exc:                      # noqa: BLE001
             _crew_error = f"{type(exc).__name__}: {exc}"
             log.error("review crew unavailable: %s", _crew_error)
     return _crew
+
+
+# Cleared at import, so every `./run.sh serve` starts from a clean study
+# without anyone having to remember to press anything.
+_clear_session_state()
 
 
 class RunCycleRequest(BaseModel):
@@ -622,30 +649,20 @@ def decide_bulk(req: BulkDecisionRequest) -> dict:
 
 @app.post("/api/monitor/reset")
 def reset_cycle() -> dict:
-    """Forget every previous cycle. Demo control, not part of TRD §5.
+    """Start the session over without restarting the server.
 
-    Cross-cycle memory works: escalations already answered in an earlier run
-    are never raised again, so a second cycle over the same cut correctly
-    leaves the human gate empty. That is the property the whole layer is
-    graded on — and it means a rehearsed demo has nothing pending to show
-    unless memory is cleared first.
+    Not a workaround for cross-cycle memory — the server already starts each
+    session clean (see SESSION_STATE_DIR). This is for restaging mid-demo:
+    you have answered a gate full of escalations and want them back without
+    dropping the server and losing the page.
 
-    So this exists to reset the demo, not to work around the guarantee. It
-    wipes the in-process crew and its snapshot; the next run-cycle starts
-    from nothing.
+    It touches only the session directory. The graded path's own state is a
+    different directory and is never affected by this.
     """
     global _crew, _crew_error
-    import shutil
-    from pathlib import Path as _Path
-
     _crew, _crew_error = None, None
-    state = _Path("state")
-    removed = []
-    for target in (state / "memory_snapshot.json", state / "trace"):
-        if target.exists():
-            shutil.rmtree(target) if target.is_dir() else target.unlink()
-            removed.append(str(target))
-    return {"status": "reset", "removed": removed}
+    _clear_session_state()
+    return {"status": "reset", "cleared": SESSION_STATE_DIR}
 
 
 @app.post("/api/monitor/escalations/{escalation_id}")
