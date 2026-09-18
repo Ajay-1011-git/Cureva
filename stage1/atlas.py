@@ -521,22 +521,40 @@ class StudyGraph:
             **domains,
         }
 
-    def first_dose_date(self, usubjid: str):
-        """The subject's earliest EX start date, or None when never dosed.
+    def first_exposure_date(self, usubjid: str, cut: int | None = "unset"):
+        """The subject's earliest EX record date, or None when never dosed.
 
-        A subject with no EX records has no first dose — returned as None, not
-        as a guess from DM.RFSTDTC. Several detectors depend on telling those
-        two states apart (build-instructions T1.12/T1.18).
+        Distinct from first_dose_date(): this is what the exposure records
+        actually say, and None here means there is no exposure record at all —
+        which is itself a finding (MISSING_EXPOSURE_RECORD).
         """
         earliest = None
-        for r in self.records("EX", usubjid=usubjid):
-            try:
-                d = parse_date(r.get("EXSTDTC"))
-            except ValueError:
-                continue                      # unparsable date: skip the row, never fatal
+        for r in self.records("EX", cut=cut, usubjid=usubjid):
+            d = self.record_date(r, cut)      # unparsable dates come back None
             if d and (earliest is None or d < earliest):
                 earliest = d
         return earliest
+
+    def reference_start_date(self, usubjid: str, cut: int | None = "unset"):
+        """DM.RFSTDTC — the study's own reference start (first dose) date."""
+        rows = self.records("DM", cut=cut, usubjid=usubjid)
+        return self.record_date(rows[0], cut) if rows else None
+
+    def first_dose_date(self, usubjid: str, cut: int | None = "unset"):
+        """When the subject was first dosed.
+
+        DM.RFSTDTC is the study's own reference start date and is authoritative;
+        the earliest EX record is the fallback for a subject whose DM row is
+        missing or carries no RFSTDTC.
+
+        These two are NOT interchangeable. On the practice study they disagree
+        for 191 of 240 subjects — EX records are scheduled administrations,
+        while RFSTDTC is the recorded first dose — and using the earliest EX
+        record instead would flag one extra subject as having an adverse event
+        before first dose who, against the study's own reference date, does not.
+        """
+        return (self.reference_start_date(usubjid, cut)
+                or self.first_exposure_date(usubjid, cut))
 
 
 def _norm(value: Any) -> str:
@@ -1191,3 +1209,170 @@ class Atlas:
             evidence=evidence,
             confidence=round(sum(f.confidence for f in findings) / len(findings), 3),
         )
+
+
+@detector("SAE_MISCODED")
+def detect_sae_miscoded(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                        cut: int | None) -> list[Finding]:
+    """An event the site coded as non-serious that its own data says was serious.
+
+    Protocol §6: a hospitalisation flag makes an event serious regardless of how
+    AESER was coded. So AESHOSP=Y with AESER=N is the site contradicting itself
+    on the one field a safety desk acts on.
+
+    The contradiction is read off the record, not assumed: both flags must be
+    present and must actually disagree.
+    """
+    rules = ProtocolRules(graph, cut)
+    findings: list[Finding] = []
+    for r in graph.records("AE", cut=cut, site=site, usubjid=usubjid):
+        hosp = _norm(graph.record_value(r, "AESHOSP", cut))
+        serious = _norm(graph.record_value(r, "AESER", cut))
+        if hosp != "Y" or serious != "N":
+            continue
+        term = (graph.record_value(r, "AETERM", cut) or "the event").strip()
+        subject = r.get("USUBJID")
+        findings.append(Finding(
+            code="SAE_MISCODED",
+            usubjid=subject,
+            site=graph.site_for(subject),
+            severity="HIGH",
+            rationale=(f"{term!r} has AESHOSP=Y but AESER=N: a hospitalisation makes an "
+                       f"event serious regardless of how AESER was coded "
+                       f"({rules.document_name} §6), so this event is under-coded and "
+                       f"was not reported as serious."),
+            evidence=[Atlas.ref(r), rules.evidence_ref(6)],
+            # Two explicit flags on one record contradicting each other. There is
+            # no interpretation involved and nothing was inferred.
+            confidence=0.95,
+            protocol_version=rules.version,
+        ))
+    findings.sort(key=lambda f: (f.usubjid or ""))
+    return findings
+
+
+@detector("AE_BEFORE_FIRST_DOSE")
+def detect_ae_before_first_dose(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                                cut: int | None) -> list[Finding]:
+    """An adverse event dated before the subject was first dosed.
+
+    Almost always a date entry error rather than a safety signal: an event
+    cannot be caused by a drug the subject had not yet received, so either the
+    event date or the dosing date is wrong.
+
+    The anchor is DM.RFSTDTC, the study's own reference start date — not the
+    earliest EX record. See StudyGraph.first_dose_date for why these are not
+    interchangeable.
+
+    A subject with no first dose at all cannot be evaluated here and is skipped
+    rather than guessed at; that case is its own finding
+    (MISSING_EXPOSURE_RECORD).
+    """
+    findings: list[Finding] = []
+    subjects = ([usubjid] if usubjid else
+                [r["USUBJID"] for r in graph.records("DM", cut=cut, site=site)])
+
+    for subject in subjects:
+        anchor = graph.first_dose_date(subject, cut)
+        if anchor is None:
+            continue                     # cannot evaluate; not a silent pass, see above
+        for r in graph.records("AE", cut=cut, usubjid=subject):
+            onset = graph.record_date(r, cut)
+            if onset is None or onset >= anchor:
+                continue
+            days = (anchor - onset).days
+            term = (graph.record_value(r, "AETERM", cut) or "adverse event").strip()
+            findings.append(Finding(
+                code="AE_BEFORE_FIRST_DOSE",
+                usubjid=subject,
+                site=graph.site_for(subject),
+                severity="MEDIUM",
+                rationale=(f"{term!r} is dated {onset}, {days} day(s) before the subject's "
+                           f"first dose on {anchor} (DM.RFSTDTC). An event cannot precede "
+                           f"the exposure it is recorded against, so one of the two dates "
+                           f"is wrong."),
+                evidence=[Atlas.ref(r), RecordRef(domain="DM", usubjid=subject)],
+                # Date arithmetic on two dates that both parsed. The only
+                # judgement is which of the two dates is the wrong one, and the
+                # finding does not claim to know that. A one-day gap is as
+                # likely a transcription slip as a real ordering error, so a
+                # narrow gap is genuinely less certain than a wide one.
+                confidence=0.9 if days >= 2 else 0.6,
+                protocol_version=graph.protocol_version_at(cut),
+            ))
+    findings.sort(key=lambda f: (f.usubjid or ""))
+    return findings
+
+
+@detector("DUPLICATE_SUBJECT")
+def detect_duplicate_subject(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                             cut: int | None) -> list[Finding]:
+    """One person apparently enrolled twice under two USUBJIDs.
+
+    HEURISTIC, and a stated limitation rather than a hidden assumption: this
+    schema carries no person identifier that spans subjects, so the only
+    available signal is demographic agreement. The key used is
+    DMINIT + BRTHDTC + SEX — subject initials, date of birth and sex, the
+    standard clinical duplicate-enrolment check.
+
+    COUNTRY and SITEID are deliberately NOT part of the key. A person enrolling
+    twice usually does so at a different site, often in a different country;
+    requiring those to match would suppress exactly the case being looked for.
+    On the practice study the matched pair sits at two sites in two countries
+    (DE and IN) and agrees on initials, date of birth, sex, arm, reference start
+    date and screening HbA1c — a key including COUNTRY finds nothing at all.
+
+    What this cannot do: distinguish a genuine duplicate from two different
+    people who share initials, a birth date and a sex. That is why every such
+    group is reported with the agreeing fields in its rationale, for a human to
+    confirm, and why confidence rises with the number of independent fields
+    that agree rather than being asserted.
+    """
+    key_fields = ("DMINIT", "BRTHDTC", "SEX")
+    #: Fields checked for extra agreement, to weight the finding. Not part of
+    #: the key — a duplicate need not agree on these to be a duplicate.
+    corroborating = ("ARM", "RFSTDTC", "SCR_HBA1C", "AGE")
+
+    groups: dict[tuple, list[dict]] = {}
+    for r in graph.records("DM", cut=cut):
+        key = tuple(_norm(graph.record_value(r, f, cut)) for f in key_fields)
+        if any(not part for part in key):
+            continue                      # an incomplete key cannot match anything
+        groups.setdefault(key, []).append(r)
+
+    findings: list[Finding] = []
+    for key, rows in groups.items():
+        if len(rows) < 2:
+            continue
+        rows.sort(key=lambda r: r.get("USUBJID") or "")
+        ids = [r.get("USUBJID") for r in rows]
+        sites = {graph.site_for(i) for i in ids}
+
+        agreed = [f for f in corroborating
+                  if len({_norm(graph.record_value(r, f, cut)) for r in rows}) == 1]
+        # Three key fields always agree by construction; each additional
+        # independent field that also agrees makes coincidence less likely.
+        confidence = min(0.92, 0.55 + 0.09 * len(agreed))
+
+        detail = ", ".join(f"{f}={rows[0].get(f)!r}" for f in key_fields)
+        extra = (" They also share " + ", ".join(f"{f}={rows[0].get(f)!r}" for f in agreed) + "."
+                 if agreed else "")
+        across = (f" enrolled at {len(sites)} different sites ({', '.join(sorted(s for s in sites if s))})"
+                  if len(sites) > 1 else " enrolled at the same site")
+
+        for r in rows:
+            findings.append(Finding(
+                code="DUPLICATE_SUBJECT",
+                usubjid=r.get("USUBJID"),
+                site=graph.site_for(r.get("USUBJID")),
+                severity="HIGH",
+                rationale=(f"{' and '.join(ids)} share {detail}{across}.{extra} "
+                           f"Heuristic: this schema has no person identifier spanning "
+                           f"subjects, so demographic agreement is the only available "
+                           f"signal — reported for human confirmation, not asserted."),
+                evidence=[RecordRef(domain="DM", usubjid=i) for i in ids],
+                confidence=confidence,
+                protocol_version=graph.protocol_version_at(cut),
+            ))
+    findings.sort(key=lambda f: (f.usubjid or ""))
+    return findings
