@@ -39,13 +39,20 @@ Answer with a single JSON object and nothing else:
 }
 
 Rules you must follow:
-- Challenge specific claims, not general positions. A challenge that does not
-  name something the other reviewer actually said is worthless.
+- Challenge specific claims, not general positions. Quote or closely paraphrase
+  the words you are disputing. A challenge that does not name something the
+  other reviewer actually said is worthless to the adjudication.
+- If another reviewer reached a different verdict from yours, you MUST challenge
+  the specific reasoning that got them there. Silent disagreement is not a
+  position; it is an abstention.
+- If you agree with a reviewer's verdict but not their reasoning, challenge the
+  reasoning. Agreeing for the wrong reason is still a defect in the record.
+- Argue from your own discipline. Do not concede a point that falls squarely in
+  your remit just because two others pushed back.
 - "target_persona" must be one of the two other reviewers shown to you, never
   yourself.
-- Return an empty "challenges" list if you genuinely dispute nothing.
 - Set "revised_verdict" only if another reviewer's point actually changed your
-  mind; otherwise return null.
+  mind, and only when you have said which point did it; otherwise return null.
 """
 
 STRICTER = "\n\nYour previous reply was not valid JSON matching the schema. Return ONLY the JSON object, no prose, no markdown fences."
@@ -69,9 +76,18 @@ async def _one_persona(client: Any, persona: Persona, finding: Any, finding_id: 
                        round1: list[PersonaVerdict], graph: Any,
                        cut: int | None) -> tuple[CrossExamResponse | None, int]:
     mine = next((v for v in round1 if v.persona == persona), None)
+    disagreeing = [v.persona for v in round1
+                   if mine is not None and v.persona != persona
+                   and v.verdict != mine.verdict]
+    pressure = ""
+    if disagreeing:
+        pressure = (f"\n\n{' and '.join(disagreeing)} reached a DIFFERENT verdict "
+                    f"from yours. You must engage with their actual reasoning — "
+                    f"say precisely where it fails on the evidence, or say what "
+                    f"in it has changed your mind.")
     system = (f"{PERSONA_BRIEF[persona]}\n\nTwo other reviewers have independently "
               f"assessed the same finding. Read what they actually wrote and "
-              f"cross-examine it.{SCHEMA_INSTRUCTION}")
+              f"cross-examine it.{pressure}{SCHEMA_INSTRUCTION}")
     user = (
         f"FINDING CODE: {finding.code}\n"
         f"SUBJECT: {finding.usubjid or '(site-level)'}\n"

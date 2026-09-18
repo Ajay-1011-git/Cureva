@@ -88,6 +88,54 @@ def is_rate_limit(exc: BaseException) -> bool:
     return "RateLimit" in name or "429" in text or "rate_limit_exceeded" in text
 
 
+def context_block(finding: Any, graph: Any, cut: int | None,
+                  protocol_chars: int = 700) -> str:
+    """The protocol text the finding rests on, plus the subject's own shape.
+
+    A reviewer given only a rationale can do nothing but agree with it. Given
+    the actual protocol clause and how much data the subject has, each persona
+    can reach its own conclusion -- which is the only way three of them
+    disagreeing means anything.
+
+    Both halves are read from the graph, never summarised by a model, and the
+    protocol excerpt is truncated hard: the free tier's ceiling is tokens per
+    minute, so context that does not change a verdict is context that costs a
+    deliberation.
+    """
+    parts: list[str] = []
+
+    # The protocol section this finding actually cites.
+    section_ref = next((e for e in finding.evidence if e.document and e.section), None)
+    if section_ref is not None:
+        try:
+            from stage1.atlas import protocol_section
+            text = (protocol_section(graph.document(section_ref.document),
+                                     section_ref.section) or "").strip()
+        except Exception:                                         # noqa: BLE001
+            text = ""
+        if text:
+            if len(text) > protocol_chars:
+                text = text[:protocol_chars].rstrip() + " […]"
+            parts.append(f"THE PROTOCOL CLAUSE THIS RESTS ON "
+                         f"({section_ref.document} §{section_ref.section}):\n{text}")
+
+    # How much of a record this subject actually has, so "isolated or a
+    # pattern" is answerable rather than guessable.
+    if finding.usubjid:
+        try:
+            profile = graph.patient360(finding.usubjid)
+            domains = profile.get("domains") or {}
+            counts = ", ".join(f"{d}={len(v)}" for d, v in sorted(domains.items()) if v)
+        except Exception:                                         # noqa: BLE001
+            counts = ""
+        if counts:
+            parts.append(f"THIS SUBJECT'S RECORD AT CUT {cut}: {counts}")
+
+    parts.append(f"PROTOCOL VERSION IN FORCE AT CUT {cut}: "
+                 f"v{graph.protocol_version_at(cut)}")
+    return "\n\n".join(parts)
+
+
 def citable_block(finding: Any) -> str:
     """The finding's evidence as exact JSON objects a persona can copy.
 

@@ -509,6 +509,46 @@ def tribunal_transcript(finding_id: str) -> dict:
     return transcript.model_dump(mode="json")
 
 
+@app.post("/api/monitor/tribunal/{finding_id}/run")
+def run_tribunal(finding_id: str) -> dict:
+    """Deliberate on one finding, now, because someone asked.
+
+    The cycle's own budget is deliberately small — six network calls per
+    finding against a token-per-minute ceiling means a whole-cycle
+    deliberation is not affordable. But a person looking at one escalation
+    and wanting the argument for *that* one is exactly the case worth
+    spending a deliberation on, so it is available on demand.
+
+    Never raises into the response: a failure comes back as ran:false with
+    the real reason, the same shape a skipped deliberation has.
+    """
+    crew = _crew_or_503()
+    verdict = next((v for v in crew.last_verdicts if v.finding_id == finding_id), None)
+    if verdict is None:
+        raise HTTPException(status_code=404,
+                            detail=f"no finding {finding_id} in the last cycle — "
+                                   f"run a cycle first")
+    try:
+        import tribunal
+        # Longer than the cycle's budget on purpose. Inside run_cycle the
+        # timeout exists to stop a network call delaying a graded result; here
+        # a person has asked for this specific argument and is waiting for it,
+        # so the tradeoff is the other way round. The free tier's ceiling is
+        # tokens per minute, and a richer prompt spends more of them, so a
+        # first attempt inside a spent window needs room to get through.
+        transcript = tribunal.deliberate(_atlas, verdict.finding, finding_id,
+                                         crew.graph.cut, timeout=45.0)
+    except Exception as exc:                          # noqa: BLE001
+        log.warning("on-demand deliberation failed for %s: %s", finding_id, exc)
+        return {"finding_id": finding_id, "ran": False,
+                "skip_reason": f"{type(exc).__name__}: {exc}",
+                "round1": [], "round2": [], "round3": None}
+    crew.transcripts[finding_id] = transcript
+    if transcript.ran:
+        verdict.tribunal_ran = True
+    return transcript.model_dump(mode="json")
+
+
 @app.get("/api/monitor/escalations")
 def escalations(state: str | None = "PENDING") -> dict:
     """Current escalations. Defaults to PENDING — the human gate's worklist."""
@@ -523,6 +563,61 @@ def escalations(state: str | None = "PENDING") -> dict:
         "counts": counts,
         "escalations": [_escalation_payload(r, crew) for r in records[:200]],
     }
+
+
+class BulkDecisionRequest(BaseModel):
+    decision: str
+    escalation_ids: list[str] | None = None
+    # With no explicit list, apply to every escalation currently in this state.
+    # A judge clearing 170 pending items one click at a time is not a demo of
+    # anything except patience.
+    all_in_state: str | None = None
+    limit: int = 500
+
+
+@app.post("/api/monitor/escalations/bulk")
+def decide_bulk(req: BulkDecisionRequest) -> dict:
+    """Apply one decision to many escalations.
+
+    Each one still goes through crew.decide(), which is the same
+    _apply_decision the node uses — so a bulk CLARIFY really does read the
+    graph and resubmit for every item, rather than taking a shortcut the
+    single-item path does not take. Slower, and correct.
+
+    One failure does not abandon the rest: each result is reported
+    individually, so a partial success is visible as a partial success.
+    """
+    crew = _crew_or_503()
+    decision = (req.decision or "").upper()
+    if decision not in ("APPROVED", "REJECTED", "CLARIFY"):
+        raise HTTPException(status_code=400,
+                            detail=f"decision must be APPROVED, REJECTED or CLARIFY "
+                                   f"— got {req.decision!r}")
+
+    ids = req.escalation_ids
+    if not ids:
+        state = (req.all_in_state or "PENDING").upper()
+        ids = [r.escalation_id for r in crew.escalation_view(state)]
+    ids = ids[:max(0, req.limit)]
+
+    applied, failed = [], []
+    for escalation_id in ids:
+        try:
+            record = crew.decide(escalation_id, decision)
+            applied.append({"escalation_id": escalation_id, "state": record.state,
+                            "clarify_count": record.clarify_count})
+        except KeyError:
+            failed.append({"escalation_id": escalation_id, "error": "not found"})
+        except Exception as exc:                      # noqa: BLE001
+            failed.append({"escalation_id": escalation_id,
+                           "error": f"{type(exc).__name__}: {exc}"})
+
+    counts: dict[str, int] = {}
+    for record in crew.memory.escalations.values():
+        counts[record.state] = counts.get(record.state, 0) + 1
+    return {"decision": decision, "requested": len(ids),
+            "applied": len(applied), "failed": len(failed),
+            "results": applied[:50], "errors": failed[:50], "counts": counts}
 
 
 @app.post("/api/monitor/reset")

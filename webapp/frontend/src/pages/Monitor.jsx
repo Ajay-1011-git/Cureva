@@ -19,6 +19,7 @@ export default function Monitor() {
   const [findingId, setFindingId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [debating, setDebating] = useState(null)
 
   const loadGate = useCallback(async () => {
     try {
@@ -49,6 +50,21 @@ export default function Monitor() {
       setBusy(false)
     }
   }, [cut, protocolVersion, loadGate])
+
+  // Deliberating on demand, because the cycle's own budget is one finding and
+  // the interesting one is whichever a person is looking at.
+  const debate = useCallback(async (fid) => {
+    setDebating(fid)
+    try {
+      await fetch(`${API_BASE}/api/monitor/tribunal/${fid}/run`, { method: 'POST' })
+      await loadGate()
+      setFindingId(fid)
+    } catch (err) {
+      setError(String(err.message || err))
+    } finally {
+      setDebating(null)
+    }
+  }, [loadGate])
 
   const reset = useCallback(async () => {
     setBusy(true)
@@ -135,6 +151,7 @@ export default function Monitor() {
             busy={busy}
             onDecided={loadGate}
             onSelectFinding={setFindingId}
+            onDebate={debate}
           />
         </section>
 
@@ -144,6 +161,12 @@ export default function Monitor() {
             Three reviewers argue a contested finding, then every claim they made is
             checked against the study's own records.
           </p>
+          {debating && (
+            <div className="trb-empty">
+              three reviewers are arguing this finding… the free tier throttles on
+              tokens per minute, so this can take up to 45 seconds.
+            </div>
+          )}
           {findingId ? (
             <TribunalPanel findingId={findingId} onClose={() => setFindingId(null)} />
           ) : deliberated.length > 0 ? (

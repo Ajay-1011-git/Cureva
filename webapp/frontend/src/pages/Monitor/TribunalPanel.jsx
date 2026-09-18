@@ -3,146 +3,188 @@ import gsap from 'gsap'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 const PERSONAS = ['SAFETY', 'CLINICAL_OPS', 'REGULATORY']
+const LABEL = { SAFETY: 'Safety', CLINICAL_OPS: 'Clinical Ops', REGULATORY: 'Regulatory' }
+const REMIT = {
+  SAFETY: 'ICH E2A seriousness · is a participant being harmed?',
+  CLINICAL_OPS: 'ICH E6(R2) GCP · isolated slip or systemic failure?',
+  REGULATORY: 'reporting duty · would the record survive inspection?',
+}
 
 /**
- * The three-round reveal (T2.20): Round 1 verdicts fill in, Round 2 challenges
- * strike through the specific claims they dispute, Round 3 stamps each claim
- * survived or discarded, then a consensus banner.
+ * The deliberation, shown as an argument rather than a list.
  *
- * The whole transcript arrives in one response and is animated client-side.
- * That is the architecture's explicit no-streaming decision, not a shortcut:
- * the deliberation is already finished server-side by the time anything is
- * shown, so streaming would only be theatre over a completed result.
+ * It opens as a full-screen room because the point of the third round is that
+ * you can watch a claim get struck down — that does not read in a sidebar.
+ * Red is ESCALATE, green is MONITOR, throughout: the same two colours carry
+ * verdict, challenge and stamp, so the moment a panel flips sides is visible
+ * without reading a word.
  *
- * A discarded claim is struck through and stamped, never removed. The point of
- * Round 3 is that you can see what was thrown out and why — a panel that
- * silently dropped it would look identical to one where it was never said.
+ * Staged deliberately slowly. The transcript is already complete when it
+ * arrives — no streaming, per the architecture's explicit decision — so the
+ * pacing is a reading aid, not a progress bar pretending work is happening.
  */
 export default function TribunalPanel({ findingId, onClose }) {
   const [transcript, setTranscript] = useState(null)
-  const [stage, setStage] = useState(0)     // 0 none, 1 verdicts, 2 challenges, 3 stamps
+  const [stage, setStage] = useState(0)   // 0 load · 1 verdicts · 2 challenges · 3 stamps · 4 consensus
   const [error, setError] = useState(null)
   const rootRef = useRef(null)
 
   useEffect(() => {
     if (!findingId) return
+    let live = true
     setTranscript(null); setStage(0); setError(null)
     fetch(`${API_BASE}/api/monitor/tribunal/${findingId}`)
       .then((r) => r.json())
-      .then(setTranscript)
-      .catch((e) => setError(String(e.message || e)))
+      .then((d) => { if (live) setTranscript(d) })
+      .catch((e) => { if (live) setError(String(e.message || e)) })
+    return () => { live = false }
   }, [findingId])
 
-  // Sequence the reveal once the transcript is in.
   useEffect(() => {
     if (!transcript?.ran) return
-    const timeline = gsap.timeline()
-    timeline.call(() => setStage(1))
-      .to({}, { duration: 0.9 })
-      .call(() => setStage(2))
-      .to({}, { duration: 1.1 })
-      .call(() => setStage(3))
-    return () => timeline.kill()
+    const tl = gsap.timeline()
+    tl.call(() => setStage(1)).to({}, { duration: 1.5 })
+      .call(() => setStage(2)).to({}, { duration: 2.0 })
+      .call(() => setStage(3)).to({}, { duration: 1.2 })
+      .call(() => setStage(4))
+    return () => tl.kill()
   }, [transcript])
 
-  // Fade each card in as its stage arrives.
   useEffect(() => {
     if (!rootRef.current || stage === 0) return
-    gsap.fromTo(rootRef.current.querySelectorAll('.trb-card'),
-      { opacity: 0, y: 14 },
-      { opacity: 1, y: 0, duration: 0.45, stagger: 0.12, ease: 'power2.out' })
+    const sel = { 1: '.tb-seat', 2: '.tb-attack', 3: '.tb-stamp', 4: '.tb-verdictbar' }[stage]
+    if (!sel) return
+    const nodes = rootRef.current.querySelectorAll(sel)
+    if (!nodes.length) return
+    gsap.fromTo(nodes,
+      { opacity: 0, scale: stage === 3 ? 1.5 : 0.96, y: stage === 2 ? -10 : 18 },
+      { opacity: 1, scale: 1, y: 0, duration: stage === 3 ? 0.5 : 0.6,
+        stagger: 0.14, ease: stage === 3 ? 'back.out(2.4)' : 'power3.out' })
   }, [stage])
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   if (!findingId) return null
 
-  if (error) {
-    return <div className="trb-wrap"><div className="trb-empty">could not load: {error}</div></div>
-  }
-  if (!transcript) {
-    return <div className="trb-wrap"><div className="trb-empty">loading deliberation…</div></div>
-  }
+  const shell = (children) => (
+    <div className="tb-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
+      <div className="tb-room" ref={rootRef}>{children}</div>
+    </div>
+  )
+
+  if (error) return shell(<div className="tb-hollow">could not load — {error}</div>)
+  if (!transcript) return shell(<div className="tb-hollow">opening the room…</div>)
 
   if (!transcript.ran) {
-    // An honest absence, shown as one. Never dressed up as agreement.
-    return (
-      <div className="trb-wrap">
-        <div className="trb-head">
+    return shell(
+      <>
+        <div className="tb-bar">
           <span>Deliberation</span>
-          <button className="trb-close" onClick={onClose}>×</button>
+          <button className="tb-x" onClick={onClose}>close</button>
         </div>
-        <div className="trb-empty">
-          <strong>No deliberation ran for this finding.</strong>
+        <div className="tb-hollow">
+          <h3>No deliberation was held for this finding.</h3>
           <p>{transcript.skip_reason}</p>
-          <p className="trb-note">
-            The verdict you see on this finding is the rule-based one, and it is
-            complete on its own — the deliberation only ever adds narrative.
+          <p className="tb-fine">
+            Its verdict is the rule-based one and is complete standing alone — the
+            panel only ever adds argument on top. This is shown as an absence, not
+            dressed up as agreement.
           </p>
         </div>
-      </div>
+      </>
     )
   }
 
   const arb = transcript.round3
-  const challengesAgainst = (persona) =>
-    transcript.round2.flatMap((r) =>
-      r.challenges.filter((c) => c.target_persona === persona)
-        .map((c) => ({ ...c, from: r.persona })))
-
-  const claimVerdict = (persona) => {
-    if (!arb || stage < 3) return null
-    const discarded = arb.discarded_claims.find(
-      (d) => d.persona === persona && d.claim.startsWith(`[${persona}]`))
-    return discarded ? { ok: false, why: discarded.reason_discarded } : { ok: true }
-  }
+  const revised = (p) => transcript.round2.find((r) => r.persona === p)?.revised_verdict
+  const finalOf = (p) => revised(p) || transcript.round1.find((v) => v.persona === p)?.verdict
+  const attacksOn = (p) => transcript.round2.flatMap((r) =>
+    r.challenges.filter((c) => c.target_persona === p).map((c) => ({ ...c, from: r.persona })))
+  const struck = (p) => arb?.discarded_claims.some(
+    (d) => d.persona === p && d.claim.startsWith(`[${p}]`))
 
   const positions = [...new Set(transcript.round1.map((v) => v.verdict))]
+  const split = positions.length > 1
+  const totalAttacks = transcript.round2.reduce((n, r) => n + r.challenges.length, 0)
+  const escalateVotes = PERSONAS.filter((p) => finalOf(p) === 'ESCALATE').length
+  const monitorVotes = PERSONAS.filter((p) => finalOf(p) === 'MONITOR').length
 
-  return (
-    <div className="trb-wrap" ref={rootRef}>
-      <div className="trb-head">
-        <span>Deliberation · {transcript.round1.length} reviewers · {transcript.tokens_used} tokens · {transcript.duration_ms}ms</span>
-        <button className="trb-close" onClick={onClose}>×</button>
+  return shell(
+    <>
+      <div className="tb-bar">
+        <span className="tb-title">
+          Deliberation
+          <em>{transcript.round1.length} reviewers · {totalAttacks} challenges · {transcript.tokens_used} tokens · {transcript.duration_ms}ms</em>
+        </span>
+        <div className="tb-steps">
+          {['verdicts', 'cross-examination', 'evidence check'].map((s, i) => (
+            <span key={s} className={`tb-step ${stage > i ? 'on' : ''}`}>{s}</span>
+          ))}
+        </div>
+        <button className="tb-x" onClick={onClose}>close</button>
       </div>
 
-      <div className="trb-grid">
-        {PERSONAS.map((persona) => {
-          const verdict = transcript.round1.find((v) => v.persona === persona)
-          if (!verdict) {
+      {stage >= 1 && split && (
+        <div className="tb-split-flag">
+          the panel is split — {positions.join(' vs ')}
+        </div>
+      )}
+
+      <div className="tb-floor">
+        {PERSONAS.map((p) => {
+          const v = transcript.round1.find((x) => x.persona === p)
+          if (!v) {
             return (
-              <div className="trb-card trb-silent" key={persona}>
-                <div className="trb-persona">{persona.replace('_', ' ')}</div>
-                <div className="trb-empty-small">no verdict this round</div>
+              <div className="tb-seat tb-seat-mute" key={p}>
+                <div className="tb-who">{LABEL[p]}</div>
+                <div className="tb-hollow-sm">no verdict — this reviewer fell silent</div>
               </div>
             )
           }
-          const against = stage >= 2 ? challengesAgainst(persona) : []
-          const stamp = claimVerdict(persona)
+          const side = (finalOf(p) || 'MONITOR').toLowerCase()
+          const attacks = stage >= 2 ? attacksOn(p) : []
+          const isStruck = stage >= 3 && struck(p)
+          const changed = revised(p) && revised(p) !== v.verdict
+
           return (
-            <div className={`trb-card ${stamp ? (stamp.ok ? 'trb-kept' : 'trb-struck') : ''}`} key={persona}>
-              <div className="trb-persona">{persona.replace('_', ' ')}</div>
-              <div className={`trb-verdict trb-${verdict.verdict.toLowerCase()}`}>
-                {verdict.verdict}
+            <div className={`tb-seat tb-${side} ${isStruck ? 'tb-dead' : ''}`} key={p}>
+              <div className="tb-who">
+                {LABEL[p]}
+                <em>{REMIT[p]}</em>
               </div>
-              <p className={`trb-reason ${against.length ? 'trb-disputed' : ''}`}>
-                {verdict.reasoning}
+
+              <div className={`tb-call tb-call-${side}`}>
+                {finalOf(p)}
+                {changed && <span className="tb-flip">changed from {v.verdict}</span>}
+              </div>
+
+              <p className={`tb-argument ${attacks.length ? 'tb-under-fire' : ''}`}>
+                {v.reasoning}
               </p>
-              <div className="trb-cites">
-                {verdict.cited_evidence.map((e, i) => (
+
+              <div className="tb-refs">
+                {v.cited_evidence.map((e, i) => (
                   <span key={i}>{e.domain}:{e.usubjid}:{e.seq ?? '—'}</span>
                 ))}
               </div>
 
-              {against.map((c, i) => (
-                <div className="trb-challenge" key={i}>
-                  <div className="trb-challenge-from">{c.from.replace('_', ' ')} disputes this</div>
-                  <div className="trb-challenge-text">{c.rebuttal}</div>
+              {attacks.map((c, i) => (
+                <div className="tb-attack" key={i}>
+                  <div className="tb-attack-head">
+                    {LABEL[c.from]} attacks this
+                  </div>
+                  <div className="tb-attack-quote">“{c.claim_challenged}”</div>
+                  <div className="tb-attack-body">{c.rebuttal}</div>
                 </div>
               ))}
 
-              {stamp && (
-                <div className={`trb-stamp ${stamp.ok ? 'ok' : 'bad'}`}>
-                  {stamp.ok ? '✓ evidence verified' : '✗ discarded'}
-                  {!stamp.ok && <div className="trb-stamp-why">{stamp.why}</div>}
+              {stage >= 3 && (
+                <div className={`tb-stamp ${isStruck ? 'bad' : 'good'}`}>
+                  {isStruck ? '✗ EVIDENCE FAILED' : '✓ EVIDENCE HELD'}
                 </div>
               )}
             </div>
@@ -150,29 +192,36 @@ export default function TribunalPanel({ findingId, onClose }) {
         })}
       </div>
 
-      {stage >= 3 && arb && (
-        <div className="trb-consensus">
-          <div className="trb-consensus-head">
-            Round 3 · {arb.method.replace(/_/g, ' ')} · zero model calls
+      {stage >= 4 && arb && (
+        <div className="tb-verdictbar">
+          <div className="tb-tally">
+            <span className="tb-tally-escalate">{escalateVotes} escalate</span>
+            <span className="tb-tally-monitor">{monitorVotes} monitor</span>
           </div>
-          <div className="trb-consensus-body">
-            <strong>{arb.final_verdict}</strong>
-            {' — '}
-            {positions.length > 1
-              ? `the panel split ${positions.join(' vs ')}; `
-              : 'the panel agreed; '}
+          <div className={`tb-final tb-final-${arb.final_verdict.toLowerCase()}`}>
+            {arb.final_verdict}
+          </div>
+          <div className="tb-final-note">
             {arb.surviving_claims.length} claim(s) survived the evidence check,
             {' '}{arb.discarded_claims.length} discarded.
+            {' '}Decided without a model — every citation was checked against the
+            study's own records.
           </div>
           {arb.discarded_claims.length > 0 && (
-            <ul className="trb-discarded">
+            <ul className="tb-killed">
               {arb.discarded_claims.map((d, i) => (
-                <li key={i}><strong>{d.persona}</strong> — {d.reason_discarded}</li>
+                <li key={i}><strong>{LABEL[d.persona] || d.persona}</strong> — {d.reason_discarded}</li>
               ))}
             </ul>
           )}
+          <div className="tb-caveat">
+            The evidence check verifies the study records each reviewer cited. Any
+            guideline or clause number in their arguments is the reviewer's own and
+            is <strong>not</strong> verified here — read it as their reasoning, not
+            as a confirmed citation.
+          </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
