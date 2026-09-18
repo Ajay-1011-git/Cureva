@@ -634,6 +634,15 @@ DEFAULT_VISIT_SCHEDULE: dict[str, int] = {
     "WEEK12": 84, "WEEK16": 112, "WEEK20": 140, "WEEK24": 168, "EOS": 182,
 }
 
+#: protocol_v1.md §2: "Age 18-75 years at screening", "HbA1c between 7.0% and
+#: 10.5% at screening". protocol_v1.md §3: "known hepatic disease (ALT or AST
+#: > 2 x ULN at screening)". The renal-impairment exclusion is v2-only and has
+#: no v1 default — it is absent before v2, not defaulted to a number.
+DEFAULT_INCLUSION_AGE_RANGE = (18.0, 75.0)
+DEFAULT_INCLUSION_HBA1C_RANGE = (7.0, 10.5)
+DEFAULT_EXCLUSION_LIVER_MULTIPLE = 2.0
+DEFAULT_EXCLUSION_CREAT_THRESHOLD_MGDL = 1.5
+
 #: How a protocol's prose names a visit, versus how the VISIT column spells it.
 _VISIT_ALIASES = {
     "SCREENING": "SCREENING", "SCREEN": "SCREENING",
@@ -712,6 +721,62 @@ class ProtocolRules:
                            or _find_section_about(self.text, "visit", "schedule", "window"))
         self.visit_window_days = self._read_visit_window()
         self.visit_schedule = self._read_visit_schedule()
+
+        self.inclusion_text = (protocol_section(self.text, 2)
+                               or _find_section_about(self.text, "inclusion"))
+        self.exclusion_text = (protocol_section(self.text, 3)
+                               or _find_section_about(self.text, "exclusion"))
+        (self.inclusion_age_range,
+         self.inclusion_hba1c_range) = self._read_inclusion_ranges()
+        (self.exclusion_liver_multiple,
+         self.exclusion_creat_threshold,
+         self.exclusion_creat_active) = self._read_exclusion_rules()
+
+    # --------------------------------------------------------- eligibility
+    def _read_inclusion_ranges(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        """(age_range, hba1c_range) from the inclusion criteria section."""
+        text = self.inclusion_text
+        age = re.search(r"[Aa]ge\s+(\d+)\s*[{0}\-]\s*(\d+)".format(re.escape("\u2013")),
+                        text)
+        hba1c = re.search(r"HbA1c\s+between\s+([\d.]+)%?\s+and\s+([\d.]+)%?", text, re.IGNORECASE)
+        if not age or not hba1c:
+            self.warnings.append(
+                f"{self.document_name}: inclusion age/HbA1c range did not fully parse; "
+                f"using documented defaults")
+        age_range = ((float(age.group(1)), float(age.group(2))) if age
+                    else DEFAULT_INCLUSION_AGE_RANGE)
+        hba1c_range = ((float(hba1c.group(1)), float(hba1c.group(2))) if hba1c
+                       else DEFAULT_INCLUSION_HBA1C_RANGE)
+        return age_range, hba1c_range
+
+    def _read_exclusion_rules(self) -> tuple[float, float, bool]:
+        """(liver ULN multiple, creatinine threshold mg/dL, is-creat-rule-active).
+
+        The creatinine exclusion is presence-based, not version-numbered: v1's
+        text simply does not contain it, and it appears from the v2 amendment
+        onward. Detecting it by searching the active document's own exclusion
+        text for "creatinine" is what makes this correct on a hidden study whose
+        amendment schedule differs from the practice study's, rather than
+        hard-coding "v2 onward" as a version-number check.
+        """
+        text = self.exclusion_text
+        liver = re.search(r"ALT\s+or\s+AST\s*>\s*(\d+(?:\.\d+)?)\s*(?:×|x|\*)\s*ULN",
+                          text, re.IGNORECASE)
+        if not liver:
+            self.warnings.append(
+                f"{self.document_name}: exclusion liver multiple did not parse; "
+                f"using documented default {DEFAULT_EXCLUSION_LIVER_MULTIPLE}x")
+        liver_multiple = float(liver.group(1)) if liver else DEFAULT_EXCLUSION_LIVER_MULTIPLE
+
+        creat = re.search(r"[Cc]reatinine\s*>\s*([\d.]+)\s*mg/dL", text)
+        active = "creatinine" in text.lower()
+        if active and not creat:
+            self.warnings.append(
+                f"{self.document_name}: creatinine exclusion mentioned but threshold "
+                f"did not parse; using documented default "
+                f"{DEFAULT_EXCLUSION_CREAT_THRESHOLD_MGDL} mg/dL")
+        threshold = float(creat.group(1)) if creat else DEFAULT_EXCLUSION_CREAT_THRESHOLD_MGDL
+        return liver_multiple, threshold, active
 
     # ---------------------------------------------------------- visit windows
     def _read_visit_window(self) -> int:
@@ -1540,5 +1605,108 @@ def detect_visit_out_of_window(graph: "StudyGraph", site: str | None, usubjid: s
                 confidence=0.9 if over >= 2 else 0.68,
                 protocol_version=rules.version,
             ))
+    findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
+    return findings
+
+
+@detector("INCLUSION_VIOLATION")
+def detect_inclusion_violation(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                               cut: int | None) -> list[Finding]:
+    """A subject who did not meet inclusion criteria at screening.
+
+    Protocol §2: age 18-75 and screening HbA1c 7.0-10.5%, both read from the
+    active protocol document rather than assumed. DM.AGE and DM.SCR_HBA1C are
+    the screening-time values by construction (this schema records them once,
+    at screening) so no separate visit lookup is needed for either.
+    """
+    rules = ProtocolRules(graph, cut)
+    lo_age, hi_age = rules.inclusion_age_range
+    lo_hba, hi_hba = rules.inclusion_hba1c_range
+    findings: list[Finding] = []
+
+    for r in graph.records("DM", cut=cut, site=site, usubjid=usubjid):
+        subject = r["USUBJID"]
+        age = to_number(graph.record_value(r, "AGE", cut))
+        hba1c = to_number(graph.record_value(r, "SCR_HBA1C", cut))
+
+        if age is not None and not (lo_age <= age <= hi_age):
+            findings.append(Finding(
+                code="INCLUSION_VIOLATION", usubjid=subject, site=graph.site_for(subject),
+                severity="HIGH",
+                rationale=(f"Age {age:g} at screening is outside the protocol's "
+                           f"{lo_age:g}-{hi_age:g} inclusion range ({rules.document_name} §2)."),
+                evidence=[RecordRef(domain="DM", usubjid=subject), rules.evidence_ref(2)],
+                # A recorded demographic compared to a documented range — no
+                # measurement noise, no missing data.
+                confidence=0.95, protocol_version=rules.version))
+
+        if hba1c is not None and not (lo_hba <= hba1c <= hi_hba):
+            findings.append(Finding(
+                code="INCLUSION_VIOLATION", usubjid=subject, site=graph.site_for(subject),
+                severity="HIGH",
+                rationale=(f"Screening HbA1c {hba1c:g}% is outside the protocol's "
+                           f"{lo_hba:g}%-{hi_hba:g}% inclusion range "
+                           f"({rules.document_name} §2)."),
+                evidence=[RecordRef(domain="DM", usubjid=subject), rules.evidence_ref(2)],
+                confidence=0.95, protocol_version=rules.version))
+
+    findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
+    return findings
+
+
+@detector("EXCLUSION_VIOLATION")
+def detect_exclusion_violation(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                               cut: int | None) -> list[Finding]:
+    """A subject who met an exclusion criterion the study should have screened out.
+
+    Protocol §3: known hepatic disease (screening ALT or AST > 2x ULN) is
+    excluded from the start; renal impairment (screening creatinine > 1.5 mg/dL)
+    is added from the v2 amendment. Whether the creatinine rule applies is
+    decided by whether the ACTIVE document at this cut mentions it
+    (rules.exclusion_creat_active), not by a hard-coded "if version >= 2" — so
+    a hidden study whose amendment lands at a different cut, or is worded
+    differently, is still handled correctly.
+
+    Screening ALT/AST goes through standardise_lab, same as the Hy's law
+    detector — a local-lab subject's screening values need the same conversion
+    before comparison.
+    """
+    rules = ProtocolRules(graph, cut)
+    findings: list[Finding] = []
+
+    subjects = ([usubjid] if usubjid else
+                [r["USUBJID"] for r in graph.records("DM", cut=cut, site=site)])
+
+    for subject in subjects:
+        labs, _unusable, _mismatched = standardised_labs(
+            graph, subject, cut, ("ALT", "AST", "CREAT"))
+        screening = [lv for lv in labs if (lv.record.get("VISIT") or "").strip() == "SCREENING"]
+
+        for lv in [lv for lv in screening if lv.testcd in ("ALT", "AST")
+                  and lv.exceeds(rules.exclusion_liver_multiple)]:
+            findings.append(Finding(
+                code="EXCLUSION_VIOLATION", usubjid=subject, site=graph.site_for(subject),
+                severity="HIGH",
+                rationale=(f"Screening {lv.describe()} exceeds "
+                           f"{rules.exclusion_liver_multiple:g}x ULN "
+                           f"({rules.exclusion_liver_multiple * lv.high:g} {lv.unit}), "
+                           f"meeting the known-hepatic-disease exclusion criterion "
+                           f"({rules.document_name} §3)."),
+                evidence=[Atlas.ref(lv.record), rules.evidence_ref(3)],
+                confidence=0.9, protocol_version=rules.version))
+
+        if rules.exclusion_creat_active:
+            for lv in [lv for lv in screening if lv.testcd == "CREAT"
+                      and lv.value is not None and lv.value > rules.exclusion_creat_threshold]:
+                findings.append(Finding(
+                    code="EXCLUSION_VIOLATION", usubjid=subject, site=graph.site_for(subject),
+                    severity="HIGH",
+                    rationale=(f"Screening {lv.describe()} exceeds "
+                               f"{rules.exclusion_creat_threshold:g} mg/dL, meeting the "
+                               f"renal-impairment exclusion criterion added in "
+                               f"{rules.document_name} §3."),
+                    evidence=[Atlas.ref(lv.record), rules.evidence_ref(3)],
+                    confidence=0.9, protocol_version=rules.version))
+
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
