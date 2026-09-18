@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { loadAvatar, createScene } from './loader.js'
-import { applyGesture, safeGesture } from './gestures.js'
+import { applyGesture, beginGestureTransition, safeGesture } from './gestures.js'
 import { SpeechAmplitude } from './speech.js'
 import { applyIdleLife, applySpeakingMotion } from './idle.js'
 
@@ -12,7 +12,8 @@ import { applyIdleLife, applySpeakingMotion } from './idle.js'
  *   - overlays an amplitude-driven head pulse while `audioEl` is playing
  * Idles (gesture="idle") by default.
  */
-export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
+export default function AvatarCanvas({ gesture = 'idle', audioEl = null,
+                                       engaged = false }) {
   const mountRef = useRef(null)
   const stateRef = useRef({ blend: 0 })
   const [status, setStatus] = useState('loading')
@@ -39,6 +40,7 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
       if (disposed) return
 
       setReport(avatar.report)
+      stateRef.current.bones = avatar.bones
       const { scene, camera } = createScene(avatar, width, height)
 
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
@@ -59,10 +61,18 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
         const t = (now - started) / 1000
         last = now
 
-        // 1. the held gesture pose, eased in over ~350ms rather than snapping
-        stateRef.current.blend = Math.min(1, stateRef.current.blend + dt / 0.35)
+        // 1. the held gesture pose. 0.9s and smoothstepped, not 0.35s linear —
+        //    a gesture arriving with the reply used to land as a lurch.
+        stateRef.current.blend = Math.min(1, stateRef.current.blend + dt / 0.9)
+        //    The attentive lean settles in over ~2.5s once engaged, so it
+        //    reads as leaning in rather than flinching.
+        const wantLean = stateRef.current.engaged ? 1 : 0
+        const leanStep = dt / 2.5
+        const lean = stateRef.current.lean ?? 0
+        stateRef.current.lean = lean + Math.max(-leanStep,
+          Math.min(leanStep, wantLean - lean))
         applyGesture(avatar.bones, avatar.restPose, stateRef.current.gesture ?? 'idle',
-          stateRef.current.blend, t)
+          stateRef.current.blend, t, stateRef.current.lean)
 
         // 2. breathing and weight shift — always, so she is never frozen
         applyIdleLife(avatar.bones, t)
@@ -113,14 +123,18 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Gesture changes reset the blend so the transition eases in again.
+  // A gesture change eases out of wherever the bones actually are right now,
+  // rather than restarting from whatever the last interpolation left behind.
   useEffect(() => {
     const safe = safeGesture(gesture)
     if (stateRef.current.gesture !== safe) {
       stateRef.current.gesture = safe
       stateRef.current.blend = 0
+      stateRef.current.bones && beginGestureTransition(stateRef.current.bones)
     }
   }, [gesture])
+
+  useEffect(() => { stateRef.current.engaged = engaged }, [engaged])
 
   return (
     <div className="avatar-canvas-wrap">

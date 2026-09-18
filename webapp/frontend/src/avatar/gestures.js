@@ -61,6 +61,27 @@ export const RELAXED_BASE = {
   leftShoulder: { x: DEG(2), y: 0, z: 0 },
 }
 
+/**
+ * The attentive forward lean adopted once the conversation has started.
+ *
+ * Before anyone speaks she stands neutral. After the first prompt she leans in
+ * slightly and stays there for the rest of the session — the posture someone
+ * takes when they are listening to you rather than waiting for you. Blended in
+ * over a couple of seconds so it reads as settling in, not as a flinch.
+ */
+export const ENGAGED_LEAN = {
+  spine: { x: DEG(4.5), y: 0, z: 0 },
+  chest: { x: DEG(3), y: 0, z: 0 },
+  neck: { x: DEG(2.5), y: 0, z: 0 },
+  head: { x: DEG(3.5), y: 0, z: 0 },
+  // Arms come forward and in a touch, the way people close distance when
+  // they're paying attention.
+  rightUpperArm: { x: DEG(-5), y: 0, z: DEG(4) },
+  leftUpperArm: { x: DEG(-5), y: 0, z: DEG(-4) },
+  rightLowerArm: { x: DEG(-7), y: 0, z: 0 },
+  leftLowerArm: { x: DEG(-7), y: 0, z: 0 },
+}
+
 /** bone -> {x,y,z} target Euler offset from RELAXED_BASE, in radians. */
 export const GESTURE_POSES = {
   idle: {},
@@ -114,35 +135,84 @@ export function safeGesture(g) {
 
 /** Apply one gesture's target pose to the bone map, lerping from rest. Called
  * every frame with a 0..1 blend factor and elapsed time (for animated poses). */
-export function applyGesture(bones, restPose, gestureName, blend, t) {
+/**
+ * Per-bone state for the gesture layer.
+ *
+ * The gesture layer keeps its OWN quaternion per bone rather than reading the
+ * bone back each frame. It has to: idle and co-speech motion are multiplied
+ * on top of the bone afterwards, so reading `bone.quaternion` here would be
+ * reading this layer's own output plus a frame of someone else's — the
+ * gesture would chase its own tail, and a gesture change (which resets the
+ * blend) produced a visible lurch. Keeping the layer's state separate means
+ * gesture interpolation is clean target-to-target, and the other layers
+ * compose on top without feeding back.
+ */
+const gestureState = new WeakMap()
+
+/** Smoothstep — eases in and out instead of arriving at constant speed. */
+const ease = (x) => x * x * (3 - 2 * x)
+
+/**
+ * Resolve one bone's target orientation for a gesture, including any
+ * animated component.
+ */
+function targetFor(role, rest, pose, gesture, engagement, t) {
+  const base = RELAXED_BASE[role]
+  const target = pose[role]
+  const lean = ENGAGED_LEAN[role]
+
+  let x = (base?.x ?? 0) + (target?.x ?? 0) + (lean?.x ?? 0) * engagement
+  let y = (base?.y ?? 0) + (target?.y ?? 0) + (lean?.y ?? 0) * engagement
+  let z = (base?.z ?? 0) + (target?.z ?? 0) + (lean?.z ?? 0) * engagement
+
+  if (gesture === 'reassure_nod' && role === 'head') {
+    x += Math.sin(t * 3.2) * DEG(7)
+  }
+  if (gesture === 'farewell_wave' && role === 'rightLowerArm') {
+    y += Math.sin(t * 6) * DEG(18)
+  }
+  return rest.quaternion.clone().multiply(
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z)))
+}
+
+/**
+ * Apply the gesture layer. `blend` is 0..1 progress into the current
+ * transition; `engagement` is 0..1 of the attentive forward lean.
+ */
+export function applyGesture(bones, restPose, gestureName, blend, t, engagement = 0) {
   const gesture = safeGesture(gestureName)
   const pose = GESTURE_POSES[gesture]
+  const k = ease(Math.max(0, Math.min(1, blend)))
 
   for (const [role, bone] of bones) {
     const rest = restPose.get(role)
     if (!rest) continue
-    // Every pose is the relaxed stance plus this gesture's offset from it.
-    const base = RELAXED_BASE[role]
-    const target = pose[role]
-    const euler = new THREE.Euler(
-      (base?.x ?? 0) + (target?.x ?? 0),
-      (base?.y ?? 0) + (target?.y ?? 0),
-      (base?.z ?? 0) + (target?.z ?? 0))
-    let deltaQuat = new THREE.Quaternion().setFromEuler(euler)
 
-    if (gesture === 'reassure_nod' && role === 'head') {
-      const nod = Math.sin(t * 3.2) * DEG(8)
-      deltaQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(nod, 0, 0))
-    }
-    if (gesture === 'farewell_wave' && role === 'rightLowerArm') {
-      const wave = Math.sin(t * 6) * DEG(18)
-      deltaQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-        (base?.x ?? 0) + (target?.x ?? 0),
-        (base?.y ?? 0) + (target?.y ?? 0) + wave,
-        (base?.z ?? 0) + (target?.z ?? 0)))
-    }
+    const desired = targetFor(role, rest, pose, gesture, engagement, t)
 
-    const targetQuat = rest.quaternion.clone().multiply(deltaQuat)
-    bone.quaternion.slerp(targetQuat, blend)
+    let state = gestureState.get(bone)
+    if (!state) {
+      // First frame for this bone — start where the gesture layer wants to
+      // be, so the avatar never snaps into position on load.
+      state = { q: desired.clone(), from: desired.clone() }
+      gestureState.set(bone, state)
+    }
+    // Interpolate this layer's own value toward the target, then WRITE it.
+    // Writing rather than slerping from the bone is what keeps idle and
+    // speech from leaking back into the gesture.
+    state.q.copy(state.from).slerp(desired, k)
+    bone.quaternion.copy(state.q)
+  }
+}
+
+/**
+ * Call when the gesture changes: freezes where each bone currently is so the
+ * next transition eases out of the real current pose rather than from
+ * wherever the previous interpolation happened to be mathematically.
+ */
+export function beginGestureTransition(bones) {
+  for (const [, bone] of bones) {
+    const state = gestureState.get(bone)
+    if (state) state.from.copy(state.q)
   }
 }

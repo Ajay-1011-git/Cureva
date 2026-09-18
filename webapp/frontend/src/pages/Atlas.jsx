@@ -25,6 +25,10 @@ export default function Atlas() {
   // default is just a subject that has a real finding to show, which makes
   // the demo's cause-and-effect visible without hunting for one live.
   const [micNotice, setMicNotice] = useState(null)
+  // She leans in once the conversation has actually started, and stays
+  // leaning for the rest of it — reset when the subject changes, since
+  // that is a new conversation with a different person.
+  const [engaged, setEngaged] = useState(false)
   const [subjects, setSubjects] = useState([])
   const [usubjid, setUsubjid] = useState(
     import.meta.env.VITE_DEMO_SUBJECT || '042-S07-001')
@@ -47,6 +51,7 @@ export default function Atlas() {
 
   const sendTurn = useCallback(async (payload) => {
     setBusy(true)
+    setEngaged(true)
     setGesture('listening')
     try {
       const resp = await fetch(`${API_BASE}/api/atlas/avatar-turn`, {
@@ -92,7 +97,7 @@ export default function Atlas() {
   // A conversation belongs to one subject. Switching person clears the log —
   // leaving another patient's words on screen under a new name would be
   // misleading in exactly the way clinical records must never be.
-  useEffect(() => { setMessages([]); setGesture('idle') }, [usubjid])
+  useEffect(() => { setMessages([]); setGesture('idle'); setEngaged(false) }, [usubjid])
 
   const handleSend = async () => {
     if (!text.trim() || busy) return
@@ -126,7 +131,7 @@ export default function Atlas() {
       </div>
       <div className="atlas-split">
         <section className="atlas-avatar-col">
-          <AvatarCanvas gesture={gesture} audioEl={audioEl} />
+          <AvatarCanvas gesture={gesture} audioEl={audioEl} engaged={engaged} />
           <div className="chat-log">
             {messages.map((m, i) => (
               <div key={i} className={`chat-msg chat-${m.role}`}>

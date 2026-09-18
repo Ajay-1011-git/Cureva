@@ -18,3 +18,7 @@ state/
 # organiser data — stays local, never pushed
 hackathon-data/
 Hackathon_Docs/
+
+# planning/build documents and the organiser's own doc bundle — local only
+instructions/
+*instructions.zip
