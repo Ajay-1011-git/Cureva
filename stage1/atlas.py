@@ -643,6 +643,9 @@ DEFAULT_INCLUSION_HBA1C_RANGE = (7.0, 10.5)
 DEFAULT_EXCLUSION_LIVER_MULTIPLE = 2.0
 DEFAULT_EXCLUSION_CREAT_THRESHOLD_MGDL = 1.5
 
+#: protocol_v1.md §5: "Systemic Glucocorticoid". v3 amendment adds "Sulfonylurea".
+DEFAULT_PROHIBITED_CONMED_CLASSES = frozenset({"SYSTEMIC_GLUCOCORTICOID"})
+
 #: How a protocol's prose names a visit, versus how the VISIT column spells it.
 _VISIT_ALIASES = {
     "SCREENING": "SCREENING", "SCREEN": "SCREENING",
@@ -731,6 +734,30 @@ class ProtocolRules:
         (self.exclusion_liver_multiple,
          self.exclusion_creat_threshold,
          self.exclusion_creat_active) = self._read_exclusion_rules()
+
+        self.conmed_text = (protocol_section(self.text, 5)
+                            or _find_section_about(self.text, "prohibited", "concomitant"))
+        self.prohibited_conmed_classes = self._read_prohibited_conmeds()
+
+    def _read_prohibited_conmeds(self) -> frozenset[str]:
+        """The set of prohibited CMCLAS values, from the active document's §5.
+
+        Read as a list of drug-class names on their own bullet lines, then
+        mapped to the coded CMCLAS vocabulary via a simple normalisation
+        (spaces -> underscores, upper-cased) rather than a fixed name->code
+        table, so a class this practice study never uses is still recognised
+        correctly if a hidden study's protocol prose names it.
+        """
+        names = re.findall(r"^\s*[-*]\s*(.+?)\s*$", self.conmed_text, re.MULTILINE)
+        names = [n for n in names if n and "prohibited" not in n.lower()
+                and "protocol deviation" not in n.lower()]
+        classes = {re.sub(r"[\s/-]+", "_", n.strip()).upper() for n in names}
+        if not classes:
+            self.warnings.append(
+                f"{self.document_name}: no prohibited-conmed list found; "
+                f"using documented default {sorted(DEFAULT_PROHIBITED_CONMED_CLASSES)}")
+            return frozenset(DEFAULT_PROHIBITED_CONMED_CLASSES)
+        return frozenset(classes)
 
     # --------------------------------------------------------- eligibility
     def _read_inclusion_ranges(self) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -1708,5 +1735,40 @@ def detect_exclusion_violation(graph: "StudyGraph", site: str | None, usubjid: s
                     evidence=[Atlas.ref(lv.record), rules.evidence_ref(3)],
                     confidence=0.9, protocol_version=rules.version))
 
+    findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
+    return findings
+
+
+@detector("PROHIBITED_CONMED")
+def detect_prohibited_conmed(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                             cut: int | None) -> list[Finding]:
+    """Use of a medication the active protocol prohibits.
+
+    Matched against CM.CMCLAS, the stable coded class, never CMTRT (the free-
+    text drug name a hidden study could spell any number of ways). The
+    prohibited set itself is read from the active document's §5 bullet list
+    (ProtocolRules), so whether a class is prohibited depends on the protocol
+    version in force at the record's own cut — an amendment adding a new
+    prohibited class does not retroactively prohibit a conmed taken before it,
+    and does not un-prohibit one taken after.
+    """
+    findings: list[Finding] = []
+    for r in graph.records("CM", cut=cut, site=site, usubjid=usubjid):
+        record_cut = r["_cut"]
+        rules = ProtocolRules(graph, record_cut)
+        cmclas = _norm(graph.record_value(r, "CMCLAS", cut)).replace(" ", "_")
+        if cmclas not in rules.prohibited_conmed_classes:
+            continue
+        subject = r.get("USUBJID")
+        trt = (graph.record_value(r, "CMTRT", cut) or cmclas).strip()
+        findings.append(Finding(
+            code="PROHIBITED_CONMED", usubjid=subject, site=graph.site_for(subject),
+            severity="MEDIUM",
+            rationale=(f"{trt} ({cmclas}) is on the prohibited list under "
+                       f"{rules.document_name} §5, in force when this medication was "
+                       f"recorded (cut {record_cut})."),
+            evidence=[Atlas.ref(r), rules.evidence_ref(5)],
+            # A coded class matched directly against a documented list.
+            confidence=0.92, protocol_version=rules.version))
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
