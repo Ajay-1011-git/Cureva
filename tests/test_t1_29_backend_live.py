@@ -44,10 +44,34 @@ check("real subject data: site S07, 60 LB rows", p["site"] == "S07" and len(p["L
 resp2 = client.get("/api/atlas/patient360/NO-SUCH-SUBJECT")
 check("unknown subject: 200 with empty data, never a 500", resp2.status_code == 200)
 
-print("\n=== VERIFY: GET /api/atlas/finding-graph, before any findings observed ===")
+print("\n=== VERIFY: GET /api/atlas/finding-graph is SEEDED at startup ===")
+# Changed deliberately: the graph used to start empty and fill only from
+# conversation, which meant /atlas opened on an empty box that said nothing
+# about the study. It is now seeded by running every detector once at startup,
+# so the panel shows the real picture immediately and a conversation is seen
+# to ADD to it.
 resp = client.get("/api/atlas/finding-graph")
-check("200 OK, empty lists (fresh session)", resp.status_code == 200
-      and resp.json() == {"nodes": [], "edges": [], "clusters": [], "centrality": {}})
+check("200 OK", resp.status_code == 200)
+graph = resp.json()
+print(f"  seeded: {len(graph['nodes'])} nodes, {len(graph['edges'])} edges, "
+      f"{len(graph['clusters'])} clusters")
+check("seeded with the study's real findings, not empty", len(graph["nodes"]) > 100)
+check("real relationships were built between them", len(graph["edges"]) > 0)
+check("every node carries a finding code",
+      all(n.get("code") for n in graph["nodes"]))
+codes = {n["code"] for n in graph["nodes"]}
+check("the Hy's law findings are present", "HYS_LAW_CANDIDATE" in codes, str(sorted(codes)))
+
+print("\n=== VERIFY: GET /api/atlas/subjects backs the subject picker ===")
+resp = client.get("/api/atlas/subjects")
+check("200 OK", resp.status_code == 200)
+subs = resp.json()
+check("all 241 enrolled subjects listed", len(subs) == 241, str(len(subs)))
+first = subs[0]
+check("each carries what the picker shows",
+      all(k in first for k in ("usubjid", "site", "arm", "age", "sex", "country",
+                               "findings", "pro_records")), str(first))
+check("finding counts are real", sum(s["findings"] for s in subs) > 0)
 
 print("\n=== VERIFY: POST /api/atlas/avatar-turn, text-only, mocked external calls ===")
 # Mocked here (no live network in an automated regression run) — the actual

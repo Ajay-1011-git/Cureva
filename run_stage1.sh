@@ -184,6 +184,7 @@ OFFLINE_TESTS=(
   tests/test_t1_21_calibration.py     tests/test_t1_22_zero_pro.py
   tests/test_t1_24_sarvam_pool.py     tests/test_t1_26_groq_contract.py
   tests/test_t1_28_finding_graph.py   tests/test_t1_32_voice_path.py
+  tests/test_t1_33_clinical_intake.py
 )
 
 # These touch the real Sarvam API or spin up the backend in-process. They are

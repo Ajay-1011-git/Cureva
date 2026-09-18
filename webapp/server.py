@@ -31,6 +31,8 @@ from stage1.atlas import Atlas, StudyGraph
 from graph.finding_graph import FindingGraph
 from intake.groq_client import GroqAvatarClient, GroqUnavailable
 from intake.models import AvatarTurnResponse, PROExtraction
+from intake.patient_context import build as build_patient_context
+from intake.red_flags import escalation_sentence, screen as screen_red_flags
 from intake.pro_writer import write_extractions
 from intake.sarvam_client import SarvamClient, SarvamUnavailable
 from intake.sarvam_pool import NoSarvamKeysConfigured
@@ -57,6 +59,26 @@ _finding_graph = FindingGraph(_graph)
 # fails once (at first use) rather than crashing the whole server at import
 # time — the server must start and serve /api/atlas/ask even with zero
 # working external credentials.
+#: Findings already present in the study, seeded once at startup so the graph
+#: on /atlas shows the real picture from the first page load rather than an
+#: empty box. A conversation then ADDS to this, which is the point — the demo
+#: is "here is what the data already says, now watch a patient add to it".
+def _seed_finding_graph() -> int:
+    """Run every registered detector once and observe the results."""
+    seeded = 0
+    for code in sorted(_atlas.detectors):
+        try:
+            answer = _atlas.answer(Question(id=f"seed-{code}", kind="finding",
+                                            text="", params={"code": code}))
+            seeded += len(_finding_graph.observe_all(answer.findings, cut=_graph.cut))
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("seeding %s failed: %s", code, exc)
+    return seeded
+
+
+_SEEDED = _seed_finding_graph()
+log.info("finding graph seeded with %d nodes", _SEEDED)
+
 _sarvam: SarvamClient | None = None
 _sarvam_error: str | None = None
 _groq: GroqAvatarClient | None = None
@@ -121,6 +143,9 @@ class AvatarTurnHTTPResponse(BaseModel):
     reply_audio_b64: str | None = None
     extracted: list[dict] = []
     pro_written: list[str] = []
+    #: Reportable symptoms detected in this turn, each with why it is
+    #: reportable. The page shows these; they are not a diagnosis.
+    red_flags: list[dict] = []
     degraded: bool = False              # not in TRD §5's literal shape, but the
                                         # frontend needs SOME way to show the
                                         # degraded-mode indicator TRD §8 requires
@@ -149,6 +174,37 @@ def ask(question: Question) -> Answer:
 @app.get("/api/atlas/patient360/{usubjid}")
 def patient360(usubjid: str) -> dict:
     return _graph.patient360(usubjid)
+
+
+@app.get("/api/atlas/subjects")
+def subjects() -> list[dict]:
+    """Every enrolled subject, for the /atlas subject picker.
+
+    "Subject" on that page is who the avatar is speaking to — a real person in
+    the study whose records the conversation will add to — so the picker needs
+    enough context to choose meaningfully (site, arm, demographics, and how
+    many findings already sit against them), not just an id to type.
+    """
+    findings_per_subject: dict[str, int] = {}
+    for node in _finding_graph.nodes.values():
+        if node.usubjid:
+            findings_per_subject[node.usubjid] = findings_per_subject.get(node.usubjid, 0) + 1
+
+    out = []
+    for r in _graph.records("DM", cut=_graph.cut):
+        usubjid = r["USUBJID"]
+        out.append({
+            "usubjid": usubjid,
+            "site": _graph.site_for(usubjid),
+            "arm": r.get("ARM"),
+            "age": r.get("AGE"),
+            "sex": r.get("SEX"),
+            "country": r.get("COUNTRY"),
+            "findings": findings_per_subject.get(usubjid, 0),
+            "pro_records": len(_graph.by_usubjid_domain.get((usubjid, "PRO"), [])),
+        })
+    out.sort(key=lambda s: s["usubjid"])
+    return out
 
 
 @app.get("/api/atlas/graph-stats")
@@ -233,8 +289,18 @@ def avatar_turn(req: AvatarTurnRequest) -> AvatarTurnHTTPResponse:
             reply_text="Let me note that down.", reply_lang="en-IN",
             gesture="listening", extracted=keyword_extraction)
     else:
+        # Give the model this subject's actual chart, so it interviews like
+        # someone who has read it rather than a generic assistant. Wrapped:
+        # a context-building failure must not cost us the turn.
         try:
-            turn = groq.turn(patient_text, lang_hint=lang_hint)
+            chart = build_patient_context(
+                _graph, req.usubjid or "", finding_graph=_finding_graph)
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("patient context failed for %s: %s", req.usubjid, exc)
+            chart = None
+        try:
+            turn = groq.turn(patient_text, lang_hint=lang_hint,
+                             patient_context=chart)
         except GroqUnavailable as exc:
             log.warning("Groq turn failed: %s", exc)
             degraded = True
@@ -246,11 +312,38 @@ def avatar_turn(req: AvatarTurnRequest) -> AvatarTurnHTTPResponse:
     # contract in TRD §5 — a real deployment would carry it from session
     # state; here it's accepted as an optional field the frontend can send,
     # defaulting to a placeholder id that never collides with a real subject)
+    # Deterministic safety screen over what the patient actually said, plus
+    # the terms the model normalised it into. This runs independently of the
+    # model's own judgement: the prompt does ask it to escalate red flags and
+    # it usually does, but "usually" is the wrong reliability for the one
+    # behaviour where a miss matters, and the same sentence was observed
+    # escalating on one call and not the next.
+    red_flags = screen_red_flags(patient_text, *[e.term for e in turn.extracted])
+    if red_flags:
+        sentence = escalation_sentence(red_flags)
+        # Don't say it twice if the model already escalated on its own.
+        if "study doctor" not in turn.reply_text.lower():
+            turn = turn.model_copy(update={
+                "reply_text": turn.reply_text.rstrip() + sentence,
+                "gesture": "concern_lean_in"})
+
     subject_id = req.usubjid or "DEMO-SUBJECT"
     written = write_extractions(_graph, subject_id, turn.extracted,
                                 transcript_ref=f"turn-{int(time.time()*1000)}",
                                 cut_available=_graph.cut or 1)
     pro_written = [f"PRO:{subject_id}:{r.seq}" for r in written]
+
+    # Put what the patient just said onto the Act 2 graph. The study's own
+    # findings are seeded at startup, so this is the part of the picture a
+    # conversation actually changes — and the page draws these differently
+    # so "what the data already said" and "what this person just added" are
+    # never confused for each other.
+    for record in written:
+        try:
+            _finding_graph.observe_pro_record(record.model_dump(mode="json"),
+                                              cut=_graph.cut)
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("could not graph PRO record: %s", exc)
 
     # After a turn that names a real subject, re-check that subject against
     # the detectors answerable from a single snapshot — this is what makes
@@ -288,7 +381,7 @@ def avatar_turn(req: AvatarTurnRequest) -> AvatarTurnHTTPResponse:
         reply_text=turn.reply_text, reply_lang=turn.reply_lang, gesture=turn.gesture,
         reply_audio_b64=reply_audio_b64,
         extracted=[e.model_dump(mode="json") for e in turn.extracted],
-        pro_written=pro_written, degraded=degraded,
+        pro_written=pro_written, degraded=degraded, red_flags=red_flags,
     )
 
 

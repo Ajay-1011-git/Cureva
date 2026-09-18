@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import networkx as nx
 
-from schemas import Finding
+from schemas import Finding, RecordRef
 from study import parse_date
 
 from .models import FindingEdge, FindingNode
@@ -86,6 +86,54 @@ class FindingGraph:
 
     def observe_all(self, findings: list[Finding], cut: int | None) -> list[FindingNode]:
         return [n for f in findings if (n := self.observe(f, cut)) is not None]
+
+    #: Node code for something the patient said, as opposed to something a
+    #: detector found. Deliberately NOT one of schemas.FindingCode: this is
+    #: Cureva's own Act-2 node type, and labelling patient-reported data with a
+    #: graded finding code would blur the one distinction that matters here —
+    #: a detector's conclusion versus a person's own words.
+    PATIENT_REPORTED = "PATIENT_REPORTED"
+
+    def observe_pro_record(self, record, cut: int | None) -> FindingNode | None:
+        """Add one patient-reported record to the graph.
+
+        This is what makes a conversation visible: the study's existing
+        findings are seeded at startup, so a turn about an already-known
+        subject would otherwise change nothing on screen. What genuinely IS
+        new is what the patient just said, so that is what gets a node —
+        carrying the verbatim quote, and linked to that subject's existing
+        findings so it lands beside them rather than floating alone.
+        """
+        usubjid = record.get("usubjid") or record.get("USUBJID")
+        seq = record.get("seq")
+        if not usubjid:
+            return None
+        key = f"{self.PATIENT_REPORTED}|{usubjid}|{seq}"
+        if key in self._fingerprints:
+            return None
+        self._fingerprints.add(key)
+
+        node = FindingNode(
+            finding_id=key,
+            code=self.PATIENT_REPORTED,
+            usubjid=usubjid,
+            site=self.study_graph.site_for(usubjid),
+            evidence=[RecordRef(domain="PRO", usubjid=usubjid, seq=seq)],
+            derived_from=["PRO"],
+            cut_available=cut or 1,
+        )
+        self.nodes[key] = node
+        self._graph.add_node(key)
+
+        # Link it to everything already standing against this subject. A
+        # symptom the patient reports is, by construction, about the same
+        # person as their existing findings — that is the connection the
+        # demo is showing.
+        for other_id, other in list(self.nodes.items()):
+            if other_id == key or other.usubjid != usubjid:
+                continue
+            self._add_edge(key, other_id, "TEMPORAL_PROXIMITY", 0.9)
+        return node
 
     # -------------------------------------------------------------- edges
     def _record_date(self, ref):

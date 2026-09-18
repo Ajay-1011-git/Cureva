@@ -61,6 +61,40 @@ TTS_MAX_CHARS = 2500
 FEMALE_SPEAKERS = ("priya", "ritu", "neha", "kavya", "shreya", "suhani")
 DEFAULT_SPEAKER = os.environ.get("SARVAM_TTS_SPEAKER", "priya")
 
+#: The exact target_language_code values bulbul accepts, taken verbatim from
+#: the API's own validation error. Anything else is rejected with HTTP 400 —
+#: which is a live failure, because an LLM asked for a BCP-47 tag will
+#: cheerfully return "en-US", "en-GB" or "pt-BR", none of which are on this
+#: list. The language is coerced into the list before the call rather than
+#: letting a perfectly good reply fail to be spoken over a locale suffix.
+SUPPORTED_TTS_LANGUAGES = frozenset({
+    "as-IN", "bn-IN", "brx-IN", "doi-IN", "en-IN", "gu-IN", "hi-IN", "kn-IN",
+    "kok-IN", "ks-IN", "mai-IN", "ml-IN", "mni-IN", "mr-IN", "ne-IN", "od-IN",
+    "pa-IN", "sa-IN", "sat-IN", "sd-IN", "ta-IN", "te-IN", "ur-IN",
+})
+FALLBACK_TTS_LANGUAGE = "en-IN"
+
+
+def supported_language(lang: str | None) -> str:
+    """The closest language code bulbul will actually accept.
+
+    An exact match wins. Otherwise the base language is re-homed to its -IN
+    locale ("en-US" -> "en-IN"), which is the right call here: bulbul only
+    speaks Indian locales, so the choice is between the same language in the
+    available locale or no speech at all. Anything unrecognisable falls back
+    to English rather than failing the turn.
+    """
+    if not lang:
+        return FALLBACK_TTS_LANGUAGE
+    tag = lang.strip()
+    if tag in SUPPORTED_TTS_LANGUAGES:
+        return tag
+    base = tag.split("-")[0].lower()
+    candidate = f"{base}-IN"
+    if candidate in SUPPORTED_TTS_LANGUAGES:
+        return candidate
+    return FALLBACK_TTS_LANGUAGE
+
 
 class SarvamUnavailable(Exception):
     """STT/TTS could not complete — timeout, exhausted pool, or a hard error.
@@ -155,13 +189,14 @@ class SarvamClient:
         exception over a length limit would not."""
         clipped = text[:TTS_MAX_CHARS]
         voice = speaker or DEFAULT_SPEAKER
+        target_language = supported_language(lang)
 
         def call(key: str) -> bytes:
             try:
                 resp = requests.post(
                     TTS_URL,
                     headers={"api-subscription-key": key, "Content-Type": "application/json"},
-                    json={"text": clipped, "target_language_code": lang,
+                    json={"text": clipped, "target_language_code": target_language,
                           "model": "bulbul:v3", "speaker": voice},
                     timeout=TIMEOUT_SECONDS,
                 )

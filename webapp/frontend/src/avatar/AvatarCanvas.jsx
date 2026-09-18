@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { loadAvatar, createScene } from './loader.js'
 import { applyGesture, safeGesture } from './gestures.js'
-import { SpeechAmplitude, applySpeechMotion } from './speech.js'
+import { SpeechAmplitude } from './speech.js'
+import { applyIdleLife, applySpeakingMotion } from './idle.js'
 
 /**
  * The avatar canvas (T1.31/T1.32). Loads avatar.glb once, mounts a three.js
@@ -16,6 +17,7 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
   const stateRef = useRef({ blend: 0 })
   const [status, setStatus] = useState('loading')
   const [report, setReport] = useState(null)
+  const [speaking, setSpeaking] = useState(false)
 
   useEffect(() => {
     let renderer, animId, avatar, speechAmp
@@ -52,16 +54,26 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
         const dt = clock.getDelta()
         const t = clock.getElapsedTime()
 
-        // Ease into a new gesture over ~350ms rather than snapping.
+        // 1. the held gesture pose, eased in over ~350ms rather than snapping
         stateRef.current.blend = Math.min(1, stateRef.current.blend + dt / 0.35)
         applyGesture(avatar.bones, avatar.restPose, stateRef.current.gesture ?? 'idle',
           stateRef.current.blend, t)
 
+        // 2. breathing and weight shift — always, so she is never frozen
+        applyIdleLife(avatar.bones, t)
+
+        // 3. co-speech head/hand/torso motion while the reply is actually
+        //    playing, driven by the speech envelope so it tracks the words
+        let level = 0
         if (speechAmp && audioEl && !audioEl.paused) {
           speechAmp.resume()
-          const level = speechAmp.update()
-          applySpeechMotion(avatar.bones, level)
+          level = speechAmp.update()
         }
+        // Ease the speaking layer out rather than cutting it dead the instant
+        // the audio ends.
+        stateRef.current.speech = (stateRef.current.speech ?? 0) * 0.88 + level * 0.12
+        applySpeakingMotion(avatar.bones, stateRef.current.speech, t)
+        setSpeaking(stateRef.current.speech > 0.04)
 
         renderer.render(scene, camera)
         animId = requestAnimationFrame(tick)
@@ -94,6 +106,7 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
       <div ref={mountRef} className="avatar-canvas-mount" />
       {status === 'loading' && <div className="avatar-status">loading avatar…</div>}
       {status === 'error' && <div className="avatar-status avatar-status-error">avatar failed to load</div>}
+      {speaking && <div className="avatar-speaking">speaking</div>}
       {report && (
         <div className="avatar-report">
           {report.mappedCount} bones mapped · {report.animationCount === 0 ? 'procedural gestures' : `${report.animationCount} clips`}

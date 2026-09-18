@@ -3,6 +3,7 @@ import gsap from 'gsap'
 import AvatarCanvas from '../avatar/AvatarCanvas.jsx'
 import FindingGraphPanel from '../components/FindingGraphPanel.jsx'
 import MicButton from '../components/MicButton.jsx'
+import SubjectPicker from '../components/SubjectPicker.jsx'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -24,10 +25,18 @@ export default function Atlas() {
   // default is just a subject that has a real finding to show, which makes
   // the demo's cause-and-effect visible without hunting for one live.
   const [micNotice, setMicNotice] = useState(null)
+  const [subjects, setSubjects] = useState([])
   const [usubjid, setUsubjid] = useState(
     import.meta.env.VITE_DEMO_SUBJECT || '042-S07-001')
   const audioRef = useRef(null)
   const [audioEl, setAudioEl] = useState(null)
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/atlas/subjects`)
+      .then((r) => r.json())
+      .then(setSubjects)
+      .catch((e) => console.warn('subject list unavailable', e))
+  }, [])
 
   useEffect(() => {
     const el = new Audio()
@@ -54,7 +63,8 @@ export default function Atlas() {
       const heard = payload.text
         ?? (data.transcript ? `🎤 ${data.transcript}` : '🎤 (nothing heard)')
       setMessages((m) => [...m, { role: 'patient', text: heard },
-        { role: 'avatar', text: data.reply_text, extracted: data.extracted }])
+        { role: 'avatar', text: data.reply_text, extracted: data.extracted,
+          redFlags: data.red_flags || [] }])
       setGesture(data.gesture)
       setDegraded(Boolean(data.degraded))
 
@@ -79,6 +89,11 @@ export default function Atlas() {
 
   const [graphVersion, setGraphVersion] = useState(0)
 
+  // A conversation belongs to one subject. Switching person clears the log —
+  // leaving another patient's words on screen under a new name would be
+  // misleading in exactly the way clinical records must never be.
+  useEffect(() => { setMessages([]); setGesture('idle') }, [usubjid])
+
   const handleSend = async () => {
     if (!text.trim() || busy) return
     const spoken = text
@@ -102,9 +117,12 @@ export default function Atlas() {
         </div>
       )}
       <div className="atlas-subject-row">
-        <label htmlFor="usubjid-input">Subject</label>
-        <input id="usubjid-input" type="text" value={usubjid}
-          onChange={(e) => setUsubjid(e.target.value)} data-testid="usubjid-input" />
+        <label>Speaking with</label>
+        <SubjectPicker subjects={subjects} value={usubjid}
+                       onChange={setUsubjid} disabled={busy} />
+        <span className="atlas-subject-hint">
+          the enrolled participant this conversation adds records to
+        </span>
       </div>
       <div className="atlas-split">
         <section className="atlas-avatar-col">
@@ -113,6 +131,24 @@ export default function Atlas() {
             {messages.map((m, i) => (
               <div key={i} className={`chat-msg chat-${m.role}`}>
                 <span className="chat-role">{m.role}</span> {m.text}
+                {m.redFlags?.length > 0 && (
+                  <div className="chat-flags">
+                    {m.redFlags.map((f, j) => (
+                      <span key={j} className="chat-flag" title={f.term}>
+                        ⚑ {f.reason}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {m.extracted?.length > 0 && (
+                  <div className="chat-extracted">
+                    {m.extracted.map((e, j) => (
+                      <span key={j} className={`chat-tag tag-${e.pro_type}`}>
+                        {e.pro_type === 'CONMED_MENTION' ? '℞' : '●'} {e.term}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -135,7 +171,8 @@ export default function Atlas() {
           </div>
         </section>
         <section className="atlas-graph-col">
-          <FindingGraphPanel apiBase={API_BASE} refreshKey={graphVersion} />
+          <FindingGraphPanel apiBase={API_BASE} refreshKey={graphVersion}
+                             subject={usubjid} />
         </section>
       </div>
     </div>
