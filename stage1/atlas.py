@@ -324,6 +324,39 @@ class StudyGraph:
         """Every site with at least one enrolled subject."""
         return sorted({s for s in (r["_site"] for r in self.by_domain["DM"]) if s})
 
+    def next_pro_seq(self, usubjid: str) -> int:
+        """The next per-subject sequence number in the PRO domain."""
+        existing = self.by_usubjid_domain.get((usubjid, "PRO"), [])
+        return (max((r["_seq"] for r in existing if r["_seq"] is not None), default=0) + 1)
+
+    def append_pro_record(self, record: dict) -> None:
+        """Append one PRO row to the live indices — no rebuild.
+
+        `record` follows the same shape as any other domain row: plain dict
+        with USUBJID and whatever fields the PRO domain carries (see
+        intake/models.py's PRORecord), plus the derived _domain/_seq/_cut/_site
+        fields every other loaded row carries, computed here the same way
+        __init__ computes them for the CSV-loaded domains.
+
+        This is the ONLY way PRO records enter StudyGraph. Called only from
+        intake/pro_writer.py (Act 1) and from the isolation test in T1.22 — the
+        graded path (StudyGraph.build/Atlas.answer) never calls it and would
+        behave identically if this method were deleted entirely.
+        """
+        usubjid = (record.get("USUBJID") or "").strip()
+        if not usubjid:
+            raise ValueError("PRO record needs a USUBJID")
+        row = dict(record)
+        row["_domain"] = "PRO"
+        row["_seq"] = _as_int(row.get("seq"))
+        row["_cut"] = _as_int(row.get("cut_available"), 1) or 1
+        row["_site"] = self.site_by_subject.get(usubjid) or site_of(usubjid)
+        row["_corrected_at"] = None
+        self.by_domain["PRO"].append(row)
+        self.by_usubjid_domain.setdefault((usubjid, "PRO"), []).append(row)
+        if row["_seq"] is not None:
+            self.by_key[("PRO", usubjid, row["_seq"])] = row
+
     def site_for(self, usubjid: str | None) -> str | None:
         """The site a subject belongs to. DM.SITEID first, id shape as fallback."""
         if not usubjid:
