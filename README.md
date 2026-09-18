@@ -15,24 +15,36 @@ Score against the public question bank (same rubric the hidden grader uses):
 python run_local_harness.py --module stage1.atlas --data hackathon-data --json stage1_public.json
 ```
 
-### Testing everything at once
+### Running and testing everything
 
-`./run_stage1.sh` runs the whole build in one command. From the repo root:
+`./run_stage1.sh` is the single entry point. From the repo root:
 
 ```bash
-./run_stage1.sh            # harness + full test suite (default)
-./run_stage1.sh quick      # harness + graded-path tests only — no network,
-                           # no API keys needed, fast (T1.1-T1.22)
-./run_stage1.sh test       # + live Sarvam/Groq/backend tests (T1.24-T1.29,
-                           # needs a real .env)
-./run_stage1.sh harness    # just the grading harness
-./run_stage1.sh serve      # backend (:8000) + frontend (:5173) together,
-                           # for browsing http://localhost:5173/atlas by hand
-./run_stage1.sh backend    # backend only
-./run_stage1.sh frontend   # frontend only
+./run_stage1.sh              # doctor + demo + harness + full suite (default)
+./run_stage1.sh doctor       # check the environment, change nothing
+./run_stage1.sh setup        # create .venv and install Python + frontend deps
+./run_stage1.sh demo         # run stage1/atlas.py's own entry point
+./run_stage1.sh harness      # score against the public question bank
+./run_stage1.sh test         # harness + every gating test
+./run_stage1.sh quick        # harness + offline tests only — no network, no keys
+./run_stage1.sh probe        # live Sarvam/Groq probes (report only, never gate)
+./run_stage1.sh serve        # backend :8000 + frontend :5173, Ctrl-C stops both
+./run_stage1.sh artifacts    # regenerate graph_stats.json + stage1_public.json
 ```
 
-Needs `.venv/` set up first (`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`) and, for `test`/`serve`, a working `.env` (see `.env.example`). See `DRIFT_NOTES.md` for anywhere this build diverged from the original planning documents, and what each `/atlas`, `/monitor`, `/watch` page actually does.
+Start with `./run_stage1.sh doctor` if anything misbehaves — it names what's
+missing (venv, dependencies, data, `schemas.py`, credentials, `node_modules`,
+the avatar asset) instead of failing somewhere confusing later. Credentials are
+optional: the entire graded path and all 23 offline tests run with no `.env` at
+all; only the avatar (Act 1) needs Sarvam and Groq keys.
+
+**Tests vs probes.** `tests/` are deterministic and gate the build — they
+assert on this system's own contracts, and network-dependent ones still assert
+only on our behaviour, never on what a language model chose to say. `probes/`
+call the real Groq/Sarvam APIs and *report* what came back; they never fail the
+build, because model wording and free-tier rate limits vary run to run and
+neither is a defect. See `DRIFT_NOTES.md` for where this build diverged from
+the planning documents.
 
 ## How we understood the problem
 

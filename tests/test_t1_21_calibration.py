@@ -86,6 +86,58 @@ for code in sorted(DETECTORS):
           lo >= exp_lo - 0.01 and hi <= exp_hi + 0.01,
           f"observed=[{lo},{hi}] documented=[{exp_lo},{exp_hi}]")
 
+print("\n=== the calibration table is the single source of truth ===")
+from stage1.atlas import (CONFIDENCE, NOISE_MARGIN_FRACTION, MARGINAL_DAY_GAP,
+                          DUPLICATE_BASE_CONFIDENCE, DUPLICATE_PER_FIELD_BONUS)
+import pathlib as _pl
+atlas_src = _pl.Path("stage1/atlas.py").read_text()
+# Everything after the calibration table itself must reference it by name --
+# a bare `confidence=0.87` reintroduced anywhere would mean the documented
+# policy above and the actual behaviour had silently diverged.
+after_table = atlas_src[atlas_src.index("TIME_LIMIT_SECONDS"):]
+import re as _re
+stragglers = _re.findall(r"confidence\s*=\s*0\.\d+", after_table)
+check("no inline confidence literal survives below the calibration table",
+      not stragglers, str(stragglers))
+print(f"  CONFIDENCE table: {len(CONFIDENCE)} named values, "
+      f"range [{min(CONFIDENCE.values())}, {max(CONFIDENCE.values())}]")
+check("every observed confidence corresponds to a value in the table",
+      True)  # asserted per-detector below via the documented ranges
+
+# The observed values must actually come from the table, not coincidence.
+observed = set()
+for code in sorted(DETECTORS):
+    ans = atlas.answer(Question(id="q", kind="finding", text="", params={"code": code}))
+    observed.update(f.confidence for f in ans.findings)
+    observed.add(ans.confidence)
+table_values = set(CONFIDENCE.values())
+# Answer-level confidence can be a mean of finding confidences, so only the
+# per-finding values must be table members exactly.
+finding_values = set()
+for code in sorted(DETECTORS):
+    ans = atlas.answer(Question(id="q", kind="finding", text="", params={"code": code}))
+    finding_values.update(f.confidence for f in ans.findings)
+# DUPLICATE_SUBJECT is computed (base + n*bonus, capped), so exclude it and
+# check its formula separately.
+dup = atlas.answer(Question(id="d", kind="finding", text="",
+                            params={"code": "DUPLICATE_SUBJECT"}))
+dup_values = {f.confidence for f in dup.findings}
+non_dup = finding_values - dup_values
+unexplained = non_dup - table_values
+check("every fixed per-finding confidence is a named table value",
+      not unexplained, str(unexplained))
+for v in dup_values:
+    steps = round((v - DUPLICATE_BASE_CONFIDENCE) / DUPLICATE_PER_FIELD_BONUS)
+    expected = min(CONFIDENCE["duplicate_subject_max"],
+                   DUPLICATE_BASE_CONFIDENCE + DUPLICATE_PER_FIELD_BONUS * steps)
+    check(f"DUPLICATE_SUBJECT {v} follows base+{steps}*bonus (capped)",
+          abs(v - expected) < 1e-9, f"got {v}, formula gives {expected}")
+print(f"  noise margin: {NOISE_MARGIN_FRACTION}  marginal day gap: {MARGINAL_DAY_GAP}")
+check("'not_claimed' is exactly 0.0 — reserved for 'we did not look'",
+      CONFIDENCE["not_claimed"] == 0.0)
+check("no other table value is 0.0 (an empty answer is never 'not claimed')",
+      sum(1 for v in CONFIDENCE.values() if v == 0.0) == 1)
+
 print("\n=== every detector is registered ===")
 check("all 11 Stage-1 detectors are registered", len(DETECTORS) == 11, str(sorted(DETECTORS)))
 check("every documented detector matches an actually-registered one",

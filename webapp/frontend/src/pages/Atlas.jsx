@@ -18,7 +18,12 @@ export default function Atlas() {
   const [messages, setMessages] = useState([])
   const [busy, setBusy] = useState(false)
   const [degraded, setDegraded] = useState(false)
-  const [usubjid, setUsubjid] = useState('042-S07-001')
+  // Which subject the conversation is "about". Overridable in the UI and via
+  // VITE_DEMO_SUBJECT so nothing is pinned to one practice-study id — the
+  // default is just a subject that has a real finding to show, which makes
+  // the demo's cause-and-effect visible without hunting for one live.
+  const [usubjid, setUsubjid] = useState(
+    import.meta.env.VITE_DEMO_SUBJECT || '042-S07-001')
   const audioRef = useRef(null)
   const [audioEl, setAudioEl] = useState(null)
 

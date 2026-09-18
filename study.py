@@ -118,8 +118,12 @@ class Study:
             "documents": sorted(self._docs)}
 
 
-# ===================================================================== TODO
-# Everything below is a stub. This is where Problem 1 is won or lost.
+# ============================================================ IMPLEMENTED
+# The organiser shipped this section as three stubs ("this is where Problem 1
+# is won or lost"). All three are implemented below — parse_date, to_number
+# and standardise_lab — each against the real shapes in hackathon-data rather
+# than assumed ones. See DRIFT_NOTES.md §1 for what the data actually
+# contained versus what the build documents predicted.
 
 # Month abbreviations are matched from this explicit table rather than via
 # strptime("%b"), which reads the process locale: on a grading machine with a

@@ -83,8 +83,9 @@ finalizing, flagging that both had "moved before." They had:
 | — (not mentioned) | `requests`' multipart upload needs an explicit `Content-Type: audio/wav` on the file part — Sarvam's endpoint 400s without it; `requests` doesn't reliably infer it. |
 
 All confirmed in `intake/sarvam_client.py` / `intake/groq_client.py` docstrings,
-and exercised with real live calls in `tests/test_t1_25_sarvam_client_live.py` /
-`tests/test_t1_26_groq_client_live.py`.
+and exercised with real live calls in `tests/test_t1_25_sarvam_client_live.py`
+and `probes/probe_groq_live.py` (see §7 for why the Groq one is a probe rather
+than a gating test).
 
 Two more things the live Groq calls surfaced that no doc anticipated:
 - The model reliably returns a bare ISO-639 code (`"en"`) for `reply_lang`
@@ -153,3 +154,51 @@ watching the answer change.
   of this — no need to rename anything in `.env` to match the doc's canonical
   names, though `SARVAM_API_KEYS=key1,key2,key3` is still the form to use if
   you want the multi-account failover pool to actually have more than one key.
+
+## 7. Corrections made after the initial build (audit pass)
+
+A follow-up audit for stubs, hard-coding and calibration found four things
+worth recording:
+
+1. **`python -m stage1.atlas` did nothing.** The README and the organiser's
+   own template both document this as the run command, but `stage1/atlas.py`
+   had no `__main__` block — it exited 0 with zero output, so a judge running
+   the documented command would have seen nothing at all. It now builds the
+   graph, prints what loaded, lists the registered detectors, and answers one
+   real question end to end. `--question '<json>'`, `--cut N` and `--json` are
+   also supported.
+
+2. **Confidence calibration was 25 scattered magic numbers.** Every value is
+   now a named entry in the `CONFIDENCE` table at the top of `stage1/atlas.py`,
+   with the tier rationale documented in one place, plus `NOISE_MARGIN_FRACTION`,
+   `MARGINAL_DAY_GAP` and the two `DUPLICATE_*` constants. `tests/test_t1_21_calibration.py`
+   now asserts *against that table* — including a regex check that no bare
+   `confidence=0.xx` literal survives below it — so the documented policy and
+   the actual behaviour cannot silently drift apart.
+
+3. **The Groq live test was structurally flaky and gated the build.** It
+   asserted on what the model *said* (which gesture it picked for an ambiguous
+   line, whether it extracted two items or one) — model judgment calls, not
+   this system's contract — so it failed intermittently for reasons that were
+   never defects, including Groq's 30 req/min free-tier limit tripping when
+   the suite ran back to back. Split into:
+     - `tests/test_t1_26_groq_contract.py` — deterministic, fully mocked, no
+       network, gates the build. Covers FR-18 coercion, retry-then-fallback,
+       empty-content retry, keyword degradation, language widening, prompt
+       guards, and construction failure on a missing key.
+     - `probes/probe_groq_live.py` — calls the real API and *reports*. Never
+       gates. Detects the rate-limit fallback signature and says so plainly
+       rather than presenting it as a failure.
+   Verified by running the full suite three times back to back: 26/26 each time.
+
+4. **Two small hard-codings loosened.** The `/atlas` demo subject now reads
+   `VITE_DEMO_SUBJECT` (default unchanged), and `study.py`'s "Everything below
+   is a stub" banner — left over from the organiser's original file and
+   actively misleading once the three functions were implemented — now says
+   what is actually there.
+
+Not changed, deliberately: no practice-study identifier appears in any
+conditional anywhere in `stage1/`, `study.py`, `intake/` or `graph/`. An
+AST-aware scan (excluding docstrings and comments, which are allowed to cite
+worked examples) found exactly one hit, and it is in the organiser's own
+unmodified `study.py` `main()` demo print.

@@ -635,7 +635,7 @@ def _metric_discontinued_ae(atlas: "Atlas", question: Question,
         # An exact count over an exact predicate on complete records. Nothing is
         # estimated, so this is as certain as the data itself. A zero is just as
         # certain as a three -- "none here" is a real answer, not a shrug.
-        confidence=0.95,
+        confidence=CONFIDENCE["count_metric"],
     )
 
 
@@ -1081,12 +1081,12 @@ def detect_hys_law(graph: "StudyGraph", site: str | None, usubjid: str | None,
 
         enzyme_margin = enzyme.margin(rules.hys_enzyme_multiple)
         bili_margin = bili.margin(rules.hys_bilirubin_multiple)
-        confidence = 0.92
+        confidence = CONFIDENCE["hys_law_clean"]
         caveats = []
         # A value sitting within a few percent of its threshold is inside
         # ordinary measurement noise — genuinely less certain, so it says so.
-        if min(enzyme_margin, bili_margin) < 0.05:
-            confidence = 0.62
+        if min(enzyme_margin, bili_margin) < NOISE_MARGIN_FRACTION:
+            confidence = CONFIDENCE["hys_law_borderline"]
             caveats.append("a value is within measurement noise of its threshold")
 
         # Values that had to be skipped (below detection, not done, unusable
@@ -1130,6 +1130,81 @@ def detect_hys_law(graph: "StudyGraph", site: str | None, usubjid: str | None,
         ))
     findings.sort(key=lambda f: f.usubjid or "")
     return findings
+
+
+# ===================================================== confidence calibration
+#
+# Every confidence value this module reports is named here rather than written
+# inline at its call site. Calibration is a policy, not an implementation
+# detail: a reviewer should be able to read the whole policy in one place and
+# change it in one place, and the T1.21 calibration test asserts against THIS
+# table rather than re-deriving the numbers, so the two cannot silently drift.
+#
+# The only real incentive the harness's own scoring creates:
+#     penalty = 0.5 * confidence**2, applied ONLY when correctness == 0
+# So being confidently wrong is the expensive failure, and an honest "nothing
+# here" costs nothing to state confidently. These values track genuine signal
+# quality on that basis — never inflated to look sure, never deflated to hedge.
+#
+# Tiers, and what earns one:
+#   0.95  an exact comparison of recorded values, with no interpretation and
+#         no possible missing-data path (two coded flags on one record
+#         contradicting each other; a demographic against a documented range)
+#   0.92  an exact comparison that depended on one derivation step first
+#         (a unit conversion, a coded class matched to a parsed document list)
+#   0.90  a clean threshold comparison, or an absence over a whole domain
+#   0.80  a rule whose inputs could be incomplete for reasons this system
+#         cannot see (dates parsed across several domains)
+#   ~0.6  the value sits inside measurement/transcription noise of its own
+#         threshold — genuinely as consistent with an entry error as a finding
+#   0.00  reserved for "this system did not look", never for "nothing found"
+CONFIDENCE = {
+    # --- exact, no interpretation -------------------------------------------
+    "sae_miscoded":            0.95,   # AESHOSP=Y vs AESER=N on one record
+    "inclusion_violation":     0.95,   # AGE / SCR_HBA1C vs a documented range
+    "dosing_error_dose":       0.95,   # EXDOSE vs the protocol's two values
+    "count_metric":            0.95,   # an exact count over an exact predicate
+    # --- exact, after one derivation step ------------------------------------
+    "prohibited_conmed":       0.92,   # CMCLAS vs the parsed §5 list
+    "hys_law_clean":           0.92,   # both values clear of threshold
+    "duplicate_subject_max":   0.92,   # heuristic ceiling — never certain
+    # --- clean threshold comparison, or a whole-domain absence ---------------
+    "lookup_clean":            0.93,   # date arithmetic, every date parsed
+    "exclusion_violation":     0.90,   # standardised lab vs documented threshold
+    "visit_out_of_window":     0.90,   # visit date vs parsed schedule+window
+    "ae_before_first_dose":    0.90,   # two parsed dates, clear ordering
+    "dosing_error_arm":        0.90,   # EXTRT vs DM.ARM — a heavier claim
+    "missing_exposure_total":  0.90,   # zero EX records for an enrolled subject
+    "lab_unit_mismatch":       0.90,   # the unit resolves or it does not
+    "finding_none_found":      0.90,   # a detector RAN and found nothing
+    "lookup_no_subject":       0.90,   # subject genuinely not in the study
+    # --- inputs could be incomplete ------------------------------------------
+    "lookup_no_visit_records": 0.85,   # subject has no dated visits at this cut
+    "missing_exposure_visit":  0.80,   # a visit with no prior EX record
+    "lookup_visit_unknown":    0.80,   # subject has visits, just not this one
+    "lookup_some_undated":     0.75,   # some records could not be placed in time
+    # --- inside measurement / transcription noise ----------------------------
+    "visit_window_marginal":   0.68,   # misses its window by a single day
+    "hys_law_borderline":      0.62,   # a value within noise of its threshold
+    "ae_before_dose_marginal": 0.60,   # precedes first dose by a single day
+    # --- "we did not look" ----------------------------------------------------
+    "not_claimed":             0.00,   # no detector/metric for this request
+}
+
+#: How close to a threshold still counts as "inside measurement noise", as a
+#: fraction of the threshold. 0.05 == within 5% of the limit.
+NOISE_MARGIN_FRACTION = 0.05
+
+#: A deviation this many days past a boundary (or a date this many days out of
+#: order) is treated as real rather than as a plausible transcription slip.
+MARGINAL_DAY_GAP = 2
+
+#: DUPLICATE_SUBJECT's heuristic starts here and rises per corroborating field
+#: that also agrees, capped at CONFIDENCE["duplicate_subject_max"]. Three key
+#: fields always agree by construction, so the base is deliberately low — it is
+#: the ADDITIONAL independent agreement that makes coincidence unlikely.
+DUPLICATE_BASE_CONFIDENCE = 0.55
+DUPLICATE_PER_FIELD_BONUS = 0.09
 
 
 #: Hard ceiling per question (PRD FR-12/NFR-1). The harness scores a question
@@ -1247,14 +1322,14 @@ class Atlas:
                 result = self._answer_finding(question, deadline)
             else:
                 result = Answer(
-                    question_id=question.id, answer=None, confidence=0.0,
+                    question_id=question.id, answer=None, confidence=CONFIDENCE["not_claimed"],
                     text=f"unsupported question kind {question.kind!r}")
         except Exception as exc:                       # noqa: BLE001 - never raise
             # The empty value matches the kind's answer type, so a caller (and
             # the demo UI) never has to handle None where it expected a list.
             empty: Any = [] if question.kind in ("lookup", "finding", "trap") else None
             result = Answer(
-                question_id=question.id, answer=empty, confidence=0.0,
+                question_id=question.id, answer=empty, confidence=CONFIDENCE["not_claimed"],
                 text=f"could not answer: {type(exc).__name__}: {exc}")
 
         result.question_id = question.id
@@ -1272,7 +1347,7 @@ class Atlas:
         metric = self.metrics.get(name)
         if metric is None:
             return Answer(
-                question_id=question.id, answer=None, confidence=0.0,
+                question_id=question.id, answer=None, confidence=CONFIDENCE["not_claimed"],
                 text=f"no metric named {name!r}; known metrics: {sorted(self.metrics) or 'none'}")
         return metric(self, question, params, deadline)
 
@@ -1299,7 +1374,7 @@ class Atlas:
         window_days = int(window) if window is not None else 0
 
         if not usubjid:
-            return Answer(question_id=question.id, answer=[], confidence=0.0,
+            return Answer(question_id=question.id, answer=[], confidence=CONFIDENCE["not_claimed"],
                           text="lookup needs a usubjid")
 
         anchor = self.graph.visit_date(usubjid, visit, cut) if visit else None
@@ -1308,14 +1383,14 @@ class Atlas:
             enrolled = bool(self.graph.records("DM", cut=cut, usubjid=usubjid))
             if not enrolled:
                 text = f"no subject {usubjid} in the study at this cut."
-                confidence = 0.9
+                confidence = CONFIDENCE["lookup_no_subject"]
             elif not known:
                 text = f"{usubjid} has no dated visit records at cut {cut}."
-                confidence = 0.85
+                confidence = CONFIDENCE["lookup_no_visit_records"]
             else:
                 text = (f"{usubjid} has no visit named {visit!r} at cut {cut}; "
                         f"visits on record: {', '.join(sorted(known))}.")
-                confidence = 0.8
+                confidence = CONFIDENCE["lookup_visit_unknown"]
             # Nothing to anchor on is a real, complete answer of "no records",
             # not a reason to guess at a nearby visit.
             return Answer(question_id=question.id, answer=[], text=text,
@@ -1349,7 +1424,8 @@ class Atlas:
             # The window is arithmetic on dates that all parsed cleanly. The
             # only genuine uncertainty is records that could not be dated, so
             # confidence drops only when some were skipped.
-            confidence=0.93 if not undated else 0.75,
+            confidence=(CONFIDENCE["lookup_clean"] if not undated
+                        else CONFIDENCE["lookup_some_undated"]),
         )
 
     def _answer_finding(self, question: Question, deadline: float) -> Answer:
@@ -1371,7 +1447,7 @@ class Atlas:
         if detector is None:
             known = ", ".join(sorted(self.detectors)) or "none"
             return Answer(
-                question_id=question.id, answer=[], confidence=0.0,
+                question_id=question.id, answer=[], confidence=CONFIDENCE["not_claimed"],
                 text=(f"no detector for finding code {code!r}; this system does not "
                       f"claim to detect it. Detectors available: {known}."))
 
@@ -1410,7 +1486,7 @@ class Atlas:
             return Answer(
                 question_id=question.id, answer=[], evidence=[], findings=[],
                 text=f"No {code} findings{scope} at cut {cut}.",
-                confidence=0.9)
+                confidence=CONFIDENCE["finding_none_found"])
 
         return Answer(
             question_id=question.id,
@@ -1457,7 +1533,7 @@ def detect_sae_miscoded(graph: "StudyGraph", site: str | None, usubjid: str | No
             evidence=[Atlas.ref(r), rules.evidence_ref(6)],
             # Two explicit flags on one record contradicting each other. There is
             # no interpretation involved and nothing was inferred.
-            confidence=0.95,
+            confidence=CONFIDENCE["sae_miscoded"],
             protocol_version=rules.version,
         ))
     findings.sort(key=lambda f: (f.usubjid or ""))
@@ -1510,7 +1586,9 @@ def detect_ae_before_first_dose(graph: "StudyGraph", site: str | None, usubjid: 
                 # finding does not claim to know that. A one-day gap is as
                 # likely a transcription slip as a real ordering error, so a
                 # narrow gap is genuinely less certain than a wide one.
-                confidence=0.9 if days >= 2 else 0.6,
+                confidence=(CONFIDENCE["ae_before_first_dose"]
+                            if days >= MARGINAL_DAY_GAP
+                            else CONFIDENCE["ae_before_dose_marginal"]),
                 protocol_version=graph.protocol_version_at(cut),
             ))
     findings.sort(key=lambda f: (f.usubjid or ""))
@@ -1565,7 +1643,9 @@ def detect_duplicate_subject(graph: "StudyGraph", site: str | None, usubjid: str
                   if len({_norm(graph.record_value(r, f, cut)) for r in rows}) == 1]
         # Three key fields always agree by construction; each additional
         # independent field that also agrees makes coincidence less likely.
-        confidence = min(0.92, 0.55 + 0.09 * len(agreed))
+        confidence = min(CONFIDENCE["duplicate_subject_max"],
+                         DUPLICATE_BASE_CONFIDENCE
+                         + DUPLICATE_PER_FIELD_BONUS * len(agreed))
 
         detail = ", ".join(f"{f}={rows[0].get(f)!r}" for f in key_fields)
         extra = (" They also share " + ", ".join(f"{f}={rows[0].get(f)!r}" for f in agreed) + "."
@@ -1662,7 +1742,9 @@ def detect_visit_out_of_window(graph: "StudyGraph", site: str | None, usubjid: s
                 # Date arithmetic against a window read from the document. The
                 # one soft edge is a visit that misses by a single day, where a
                 # date transcription slip is as likely as a real deviation.
-                confidence=0.9 if over >= 2 else 0.68,
+                confidence=(CONFIDENCE["visit_out_of_window"]
+                            if over >= MARGINAL_DAY_GAP
+                            else CONFIDENCE["visit_window_marginal"]),
                 protocol_version=rules.version,
             ))
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
@@ -1698,7 +1780,8 @@ def detect_inclusion_violation(graph: "StudyGraph", site: str | None, usubjid: s
                 evidence=[RecordRef(domain="DM", usubjid=subject), rules.evidence_ref(2)],
                 # A recorded demographic compared to a documented range — no
                 # measurement noise, no missing data.
-                confidence=0.95, protocol_version=rules.version))
+                confidence=CONFIDENCE["inclusion_violation"],
+                protocol_version=rules.version))
 
         if hba1c is not None and not (lo_hba <= hba1c <= hi_hba):
             findings.append(Finding(
@@ -1708,7 +1791,8 @@ def detect_inclusion_violation(graph: "StudyGraph", site: str | None, usubjid: s
                            f"{lo_hba:g}%-{hi_hba:g}% inclusion range "
                            f"({rules.document_name} §2)."),
                 evidence=[RecordRef(domain="DM", usubjid=subject), rules.evidence_ref(2)],
-                confidence=0.95, protocol_version=rules.version))
+                confidence=CONFIDENCE["inclusion_violation"],
+                protocol_version=rules.version))
 
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
@@ -1753,7 +1837,8 @@ def detect_exclusion_violation(graph: "StudyGraph", site: str | None, usubjid: s
                            f"meeting the known-hepatic-disease exclusion criterion "
                            f"({rules.document_name} §3)."),
                 evidence=[Atlas.ref(lv.record), rules.evidence_ref(3)],
-                confidence=0.9, protocol_version=rules.version))
+                confidence=CONFIDENCE["exclusion_violation"],
+                protocol_version=rules.version))
 
         if rules.exclusion_creat_active:
             for lv in [lv for lv in screening if lv.testcd == "CREAT"
@@ -1766,7 +1851,8 @@ def detect_exclusion_violation(graph: "StudyGraph", site: str | None, usubjid: s
                                f"renal-impairment exclusion criterion added in "
                                f"{rules.document_name} §3."),
                     evidence=[Atlas.ref(lv.record), rules.evidence_ref(3)],
-                    confidence=0.9, protocol_version=rules.version))
+                    confidence=CONFIDENCE["exclusion_violation"],
+                    protocol_version=rules.version))
 
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
@@ -1802,7 +1888,8 @@ def detect_prohibited_conmed(graph: "StudyGraph", site: str | None, usubjid: str
                        f"recorded (cut {record_cut})."),
             evidence=[Atlas.ref(r), rules.evidence_ref(5)],
             # A coded class matched directly against a documented list.
-            confidence=0.92, protocol_version=rules.version))
+            confidence=CONFIDENCE["prohibited_conmed"],
+            protocol_version=rules.version))
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
 
@@ -1845,7 +1932,7 @@ def detect_dosing_error(graph: "StudyGraph", site: str | None, usubjid: str | No
                                f"Protocol §8."),
                     evidence=[Atlas.ref(r)],
                     # Exact comparison against the protocol's own two allowed values.
-                    confidence=0.95,
+                    confidence=CONFIDENCE["dosing_error_dose"],
                     protocol_version=graph.protocol_version_at(record_cut := r["_cut"])))
 
             if arm and extrt and extrt != arm:
@@ -1856,7 +1943,7 @@ def detect_dosing_error(graph: "StudyGraph", site: str | None, usubjid: str | No
                                f"randomised arm (DM.ARM={arm}) — the wrong treatment may "
                                f"have been dispensed."),
                     evidence=[Atlas.ref(r), RecordRef(domain="DM", usubjid=subject)],
-                    confidence=0.9,
+                    confidence=CONFIDENCE["dosing_error_arm"],
                     protocol_version=graph.protocol_version_at(r["_cut"])))
 
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
@@ -1904,7 +1991,8 @@ def detect_missing_exposure_record(graph: "StudyGraph", site: str | None, usubji
                 evidence=[RecordRef(domain="DM", usubjid=subject)],
                 # An absence over the whole EX domain for an enrolled subject —
                 # nothing borderline about zero records.
-                confidence=0.9, protocol_version=graph.protocol_version_at(cut)))
+                confidence=CONFIDENCE["missing_exposure_total"],
+                protocol_version=graph.protocol_version_at(cut)))
             continue
 
         ex_dates = sorted(d for d in (graph.record_date(r, cut) for r in ex_rows) if d)
@@ -1926,7 +2014,8 @@ def detect_missing_exposure_record(graph: "StudyGraph", site: str | None, usubji
                     rationale=(f"{domain} record at visit {visit} ({d}) has no EX (dosing) "
                                f"record on or before that date for this subject."),
                     evidence=[Atlas.ref(r)],
-                    confidence=0.8, protocol_version=graph.protocol_version_at(cut)))
+                    confidence=CONFIDENCE["missing_exposure_visit"],
+                    protocol_version=graph.protocol_version_at(cut)))
 
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
@@ -1966,8 +2055,96 @@ def detect_lab_unit_mismatch(graph: "StudyGraph", site: str | None, usubjid: str
                 evidence=[Atlas.ref(r)],
                 # The unit itself is either recognised or it is not — no
                 # judgement call involved once standardise_lab has raised.
-                confidence=0.9, protocol_version=graph.protocol_version_at(cut)))
+                confidence=CONFIDENCE["lab_unit_mismatch"],
+                protocol_version=graph.protocol_version_at(cut)))
         except NoReferenceRange:
             continue                     # a different problem; not reported here
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
+
+
+# ================================================================== entry point
+def main(argv: list[str] | None = None) -> int:
+    """`python -m stage1.atlas --data hackathon-data`
+
+    The entry point the organiser's README template documents and a judge is
+    expected to run from a clean checkout. It builds the graph, prints what
+    was loaded, lists the detectors this system actually claims, and answers
+    one real question end to end so the output is evidence the thing works —
+    not just a silent exit.
+    """
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        prog="python -m stage1.atlas",
+        description="Cureva Stage 1 — build the study graph and answer a question.")
+    parser.add_argument("--data", default="hackathon-data",
+                        help="path to the hackathon-data folder")
+    parser.add_argument("--cut", type=int, default=None,
+                        help="build at this data cut (default: the whole study)")
+    parser.add_argument("--question", default=None,
+                        help="a Question as JSON, e.g. "
+                             "'{\"id\":\"q\",\"kind\":\"finding\",\"text\":\"\","
+                             "\"params\":{\"code\":\"HYS_LAW_CANDIDATE\"}}'")
+    parser.add_argument("--json", action="store_true",
+                        help="print machine-readable JSON instead of a report")
+    args = parser.parse_args(argv)
+
+    graph = StudyGraph(args.data)
+    stats = graph.build(cut=args.cut)
+    atlas = Atlas(graph)
+
+    if args.question:
+        question = Question(**_json.loads(args.question))
+        answer = atlas.answer(question)
+        print(_json.dumps(answer.model_dump(mode="json"), indent=2, default=str))
+        return 0
+
+    if args.json:
+        print(_json.dumps(graph.stats, indent=2, default=str))
+        return 0
+
+    extra = graph.stats
+    print(f"Cureva Stage 1 — Atlas      data: {args.data}")
+    print("=" * 62)
+    print(f"  graph built             {stats['nodes']} records, "
+          f"{stats['subjects']} subjects, {stats['ms']}ms")
+    print(f"  cut                     {stats['cut'] if stats['cut'] is not None else 'all'}"
+          f"   (protocol v{extra.get('protocol_version')})")
+    print(f"  corrections applied     {extra.get('corrections_applied')}")
+    print(f"  malformed rows skipped  {extra.get('malformed_rows')}")
+    print(f"  documents loaded        {', '.join(extra.get('documents', []))}")
+    print()
+    print("  records per domain")
+    for domain, count in (extra.get("per_domain") or {}).items():
+        note = "   <- Cureva's 10th domain, written only by the avatar (Act 1)" \
+               if domain == PRO_DOMAIN else ""
+        print(f"    {domain:<5} {count:>6}{note}")
+    print()
+    print(f"  detectors registered    {len(atlas.detectors)}")
+    for code in sorted(atlas.detectors):
+        print(f"    - {code}")
+    print(f"  count metrics           {', '.join(sorted(atlas.metrics)) or 'none'}")
+    print()
+
+    # One real question, answered end to end, so this output is evidence.
+    demo = Question(id="demo", kind="finding", text="Which subjects show the "
+                    "liver-damage pattern?", params={"code": "HYS_LAW_CANDIDATE"},
+                    cut=args.cut)
+    answer = atlas.answer(demo)
+    print(f"  example question        {demo.params['code']}")
+    print(f"    answer                {answer.answer}")
+    print(f"    confidence            {answer.confidence}")
+    print(f"    evidence              {len(answer.evidence)} record reference(s)")
+    if answer.findings:
+        print(f"    first rationale       {answer.findings[0].rationale[:150]}...")
+    print("=" * 62)
+    print("Score against the public question bank with:")
+    print(f"  python run_local_harness.py --module stage1.atlas --data {args.data}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys as _sys
+    _sys.exit(main())
