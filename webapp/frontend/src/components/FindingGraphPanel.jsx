@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import FindingGraph3D, { hexFor } from './FindingGraph3D.jsx'
+import FindingGraph3D from './FindingGraph3D.jsx'
 import FindingDetail from './FindingDetail.jsx'
+import Icon from './Icon.jsx'
+import { groupCodesByFamily, labelFor } from '../lib/findingCodes.js'
 
 /**
  * Act 2 — the whole finding graph over the real study, drawn as a graph.
@@ -12,51 +14,11 @@ import FindingDetail from './FindingDetail.jsx'
  * whole demo: here is what the data already says, now watch a patient add to
  * it by speaking.
  *
- * Layout is a deterministic cluster layout, not a force simulation: clusters
- * are placed on a ring and their members on a smaller ring inside it. At this
- * node count a force sim costs a lot of frames to converge and lands somewhere
- * slightly different every reload, which makes it useless for narrating a demo
- * twice in a row. This is stable, instant, and readable.
+ * The legend is grouped by family because that is what colour encodes. Each
+ * chip still names its code, and clicking one isolates it — so the reader who
+ * needs per-code identity gets it from the word and the filter, which is the
+ * honest way to carry twelve categories through five hues.
  */
-
-
-
-function layout(nodes, clusters) {
-  const pos = new Map()
-  const byId = new Map(nodes.map((n) => [n.finding_id, n]))
-  // Big clusters first so they get the roomier outer slots.
-  const ordered = [...clusters].sort((a, b) => b.length - a.length)
-  const cx = W / 2
-  const cy = H / 2
-
-  ordered.forEach((cluster, ci) => {
-    // Clusters spiral outward: index 0 near the middle, later ones further
-    // out, so a large connected group reads as the centre of the picture.
-    const ang = ci * 2.399963           // golden angle — avoids visible spokes
-    const rad = 34 + Math.sqrt(ci) * 46
-    const gx = cx + Math.cos(ang) * rad
-    const gy = cy + Math.sin(ang) * rad * 0.72
-
-    if (cluster.length === 1) {
-      pos.set(cluster[0], { x: gx, y: gy })
-      return
-    }
-    const r = Math.min(46, 11 + cluster.length * 2.6)
-    cluster.forEach((id, i) => {
-      const a = (i / cluster.length) * Math.PI * 2
-      pos.set(id, { x: gx + Math.cos(a) * r, y: gy + Math.sin(a) * r })
-    })
-  })
-
-  // Anything the backend didn't put in a cluster still needs a home.
-  nodes.forEach((n, i) => {
-    if (!pos.has(n.finding_id)) {
-      pos.set(n.finding_id, { x: 30 + (i * 37) % (W - 60), y: 30 + (i * 53) % (H - 60) })
-    }
-  })
-  return { pos, byId }
-}
-
 export default function FindingGraphPanel({ apiBase, refreshKey, subject,
                                             onSelectSubject }) {
   const [snapshot, setSnapshot] = useState(
@@ -106,47 +68,75 @@ export default function FindingGraphPanel({ apiBase, refreshKey, subject,
     return () => { cancelled = true }
   }, [apiBase, refreshKey])
 
-
-  const codes = useMemo(() => {
+  const families = useMemo(() => {
     const counts = {}
     snapshot.nodes.forEach((n) => { counts[n.code] = (counts[n.code] || 0) + 1 })
-    return Object.entries(counts).sort((a, b) => b[1] - a[1])
+    return groupCodesByFamily(Object.entries(counts))
   }, [snapshot])
-
 
   const newCount = newIds.current.size
   const subjectNodes = snapshot.nodes.filter((n) => n.usubjid === subject).length
 
   return (
-    <div className="finding-graph-panel">
-      <div className="fg-header">
-        <h2>Finding graph</h2>
-        <span className="fg-stats">
+    <div className="card graph-card">
+      <div className="card-head">
+        <div className="u-col" style={{ gap: 6 }}>
+          <span className="tag tag-ink">
+            <Icon name="graph" size={13} />
+            Finding graph
+          </span>
+        </div>
+        <span className="t-caption t-quiet t-num">
           {snapshot.nodes.length} findings · {snapshot.edges.length} links ·{' '}
           {snapshot.clusters.length} clusters
         </span>
       </div>
 
-      <div className="fg-legend">
-        <button className={`fg-chip${!codeFilter ? ' active' : ''}`}
-                onClick={() => setCodeFilter(null)}>all</button>
-        {codes.map(([code, n]) => (
-          <button key={code}
-                  className={`fg-chip${codeFilter === code ? ' active' : ''}`}
-                  onClick={() => setCodeFilter(codeFilter === code ? null : code)}
-                  title={`${code} — ${n}`}>
-            <i style={{ background: hexFor(code) }} />
-            {code.replace(/_/g, ' ').toLowerCase()} <b>{n}</b>
+      <div className="graph-legend">
+        <div className="graph-family">
+          <span className="graph-family-name">
+            <Icon name="filter" size={12} />
+            All families
+          </span>
+          <button className={`graph-chip${!codeFilter ? ' is-on' : ''}`}
+                  onClick={() => setCodeFilter(null)}>
+            show everything <b>{snapshot.nodes.length}</b>
           </button>
+        </div>
+
+        {families.map(({ family, codes, total }) => (
+          <div className="graph-family" key={family.id}>
+            <span className="graph-family-name" title={family.blurb}>
+              <i style={{ background: family.color }} />
+              {family.label} <b className="t-num">{total}</b>
+            </span>
+            {codes.map(([code, n]) => (
+              <button key={code}
+                      className={`graph-chip${codeFilter === code ? ' is-on' : ''}`}
+                      onClick={() => setCodeFilter(codeFilter === code ? null : code)}
+                      title={`${code} — ${n} finding(s)`}>
+                <i style={{ background: family.color }} />
+                {labelFor(code)} <b>{n}</b>
+              </button>
+            ))}
+          </div>
         ))}
       </div>
 
-      {error && <div className="fg-empty">Could not load the graph: {error}</div>}
+      {error && (
+        <div className="graph-empty">
+          <Icon name="alert" size={24} strokeWidth={1.4} />
+          Could not load the graph — {error}
+        </div>
+      )}
 
       {snapshot.nodes.length === 0 && !error ? (
-        <div className="fg-empty">No findings yet.</div>
+        <div className="graph-empty">
+          <Icon name="graph" size={26} strokeWidth={1.4} />
+          No findings yet.
+        </div>
       ) : (
-        <div className="fg-body">
+        <div className="graph-body">
           <FindingGraph3D
             snapshot={snapshot}
             subject={subject}
@@ -161,9 +151,16 @@ export default function FindingGraphPanel({ apiBase, refreshKey, subject,
         </div>
       )}
 
-      <div className="fg-footer">
-        <span className="fg-key"><i className="k-subject" /> this subject ({subjectNodes})</span>
-        <span className="fg-key"><i className="k-new" /> added this session ({newCount})</span>
+      <div className="graph-foot">
+        <span className="graph-key">
+          <i className="k-subject" /> this subject <b className="t-num">({subjectNodes})</b>
+        </span>
+        <span className="graph-key">
+          <i className="k-new" /> added this session <b className="t-num">({newCount})</b>
+        </span>
+        <span className="t-quiet" style={{ marginLeft: 'auto' }}>
+          colour is the family · the chip names the code
+        </span>
       </div>
     </div>
   )

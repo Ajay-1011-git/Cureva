@@ -1,0 +1,252 @@
+/* ============================================================================
+   Base + primitives.
+   Reset, the type scale as real classes, and the handful of shapes every page
+   is assembled from: the pill button, the floating card, the chip, the input,
+   the drop zone. Pages compose these; they do not re-declare them.
+   ========================================================================= */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+html, body, #root { margin: 0; padding: 0; min-height: 100%; }
+
+body {
+  background: var(--color-paper-white);
+  color: var(--color-obsidian);
+  font-family: var(--font-display);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+  font-feature-settings: 'ss01' on;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 { margin: 0; font-weight: var(--weight-semibold); color: var(--color-ink); }
+p { margin: 0; }
+ul, ol { margin: 0; padding: 0; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { background: none; border: none; padding: 0; cursor: pointer; }
+a { color: inherit; }
+
+::selection { background: var(--color-sky-tint); color: var(--color-obsidian); }
+
+/* A visible focus ring everywhere, in the accent, since nothing else in the
+   system is blue enough to be mistaken for it. */
+:focus-visible {
+  outline: 2px solid var(--color-surgical-blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-icon);
+}
+
+/* Scrollbars inside panels, kept thin so a scrolling list does not grow a
+   gray gutter in the middle of a white card. */
+.u-scroll { scrollbar-width: thin; scrollbar-color: var(--color-hairline) transparent; }
+.u-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.u-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-hairline); border-radius: var(--radius-pill);
+  border: 2px solid transparent; background-clip: content-box;
+}
+.u-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ------------------------------------------------------------------ type */
+.t-display {
+  font-size: var(--text-display); line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display); font-weight: var(--weight-semibold);
+}
+.t-heading {
+  font-size: var(--text-heading); line-height: var(--leading-heading);
+  letter-spacing: var(--tracking-heading); font-weight: var(--weight-semibold);
+}
+.t-heading-sm {
+  font-size: var(--text-heading-sm); line-height: var(--leading-heading-sm);
+  letter-spacing: var(--tracking-heading-sm); font-weight: var(--weight-semibold);
+}
+.t-subheading {
+  font-size: var(--text-subheading); line-height: var(--leading-subheading);
+  letter-spacing: var(--tracking-subheading); font-weight: var(--weight-semibold);
+}
+.t-body    { font-size: var(--text-body);    line-height: var(--leading-body); }
+.t-body-lg { font-size: var(--text-body-lg); line-height: var(--leading-body-lg); }
+.t-body-sm { font-size: var(--text-body-sm); line-height: var(--leading-body-sm); }
+.t-caption {
+  font-family: var(--font-ui); font-size: var(--text-caption);
+  line-height: var(--leading-caption); font-weight: var(--weight-medium);
+}
+.t-muted { color: var(--color-charcoal); }
+.t-quiet { color: var(--color-slate); }
+
+/* An all-caps micro label. Tracking goes POSITIVE here — the display face's
+   negative tracking is for large sizes and turns 11px caps into a smudge. */
+.t-eyebrow {
+  font-family: var(--font-ui); font-size: 11px; font-weight: var(--weight-medium);
+  letter-spacing: 0.10em; text-transform: uppercase; color: var(--color-slate);
+}
+
+.t-num { font-variant-numeric: tabular-nums; }
+.t-mono { font-family: var(--font-mono); font-size: 0.78em; letter-spacing: 0; }
+
+/* ---------------------------------------------------------------- layout */
+.l-page      { max-width: var(--page-max);      margin-inline: auto; padding-inline: var(--gutter); }
+.l-workspace { max-width: var(--workspace-max); margin-inline: auto; padding-inline: var(--gutter); }
+
+.l-section { padding-block: var(--section-gap); }
+.l-section-cloud { background: var(--color-cloud-gray); }
+
+/* --------------------------------------------------------------- buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 24px; border-radius: var(--radius-pill);
+  font-family: var(--font-display); font-size: var(--text-body-sm);
+  font-weight: var(--weight-medium); letter-spacing: -0.01em;
+  white-space: nowrap; cursor: pointer; border: 1px solid transparent;
+  transition: background-color 0.24s var(--ease-out), color 0.24s var(--ease-out),
+              border-color 0.24s var(--ease-out), box-shadow 0.28s var(--ease-out),
+              transform 0.28s var(--ease-out), opacity 0.2s linear;
+}
+.btn:disabled { opacity: 0.42; cursor: default; box-shadow: none; transform: none; }
+
+/* Added by useMagnetic(): GSAP owns transform from here, so the CSS transition
+   must let go of it or the two interpolate against each other. */
+.is-magnetic {
+  transition-property: background-color, color, border-color, box-shadow, opacity;
+}
+
+/* The action colour is near-black. Never a chromatic fill. */
+.btn-primary {
+  background: var(--color-obsidian); color: var(--color-paper-white);
+  box-shadow: var(--shadow-button);
+}
+.btn-primary:hover:not(:disabled) { box-shadow: var(--shadow-button-lift); transform: translateY(-1px); }
+.btn-primary:active:not(:disabled) { transform: translateY(0); box-shadow: var(--shadow-button); }
+
+.btn-ghost {
+  background: transparent; color: var(--color-obsidian);
+  border-color: var(--color-hairline);
+}
+.btn-ghost:hover:not(:disabled) { border-color: var(--color-obsidian); background: rgba(7, 7, 9, 0.03); }
+
+.btn-quiet { background: transparent; color: var(--color-charcoal); border-color: transparent; }
+.btn-quiet:hover:not(:disabled) { color: var(--color-obsidian); background: rgba(7, 7, 9, 0.04); }
+
+.btn-sm { padding: 7px 14px; font-size: var(--text-caption); }
+.btn-xs { padding: 5px 11px; font-size: 11px; }
+.btn-block { width: 100%; }
+
+/* A ghost button that commits to an outcome on hover — the only place a
+   status colour touches a control, and the word is always in the label. */
+.btn-good:hover:not(:disabled)  { border-color: var(--status-good);     color: var(--status-good);     background: var(--status-good-bg); }
+.btn-warn:hover:not(:disabled)  { border-color: var(--status-warn);     color: var(--status-warn);     background: var(--status-warn-bg); }
+.btn-crit:hover:not(:disabled)  { border-color: var(--status-critical); color: var(--status-critical); background: var(--status-crit-bg); }
+
+/* An inline text button that reads as a link but is a real <button>. */
+.btn-link {
+  font-family: var(--font-ui); font-size: var(--text-body-sm);
+  color: var(--color-surgical-blue-ink); text-decoration: underline;
+  text-underline-offset: 2px; text-decoration-thickness: 1px;
+  padding: 0; border-radius: 4px; transition: color 0.2s var(--ease-out);
+}
+.btn-link:hover:not(:disabled) { color: var(--color-obsidian); }
+.btn-link:disabled { opacity: 0.45; cursor: default; }
+.btn-link-quiet { color: var(--color-charcoal); text-decoration-color: var(--color-hairline); }
+
+/* ----------------------------------------------------------------- cards */
+.card {
+  background: var(--color-paper-white);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--card-padding);
+}
+.card-tight { padding: 20px; }
+.card-lined { box-shadow: var(--shadow-subtle); border: 1px solid var(--color-hairline-soft); }
+.card-cloud { background: var(--color-cloud-gray); box-shadow: none; }
+
+.card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 18px;
+}
+
+/* ------------------------------------------------------------------ tags */
+.tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: var(--radius-pill);
+  border: 1px solid var(--color-hairline); background: var(--color-paper-white);
+  font-family: var(--font-ui); font-size: var(--text-caption);
+  font-weight: var(--weight-medium); color: var(--color-obsidian);
+  white-space: nowrap; line-height: 1.4;
+}
+.tag svg { color: var(--color-surgical-blue); flex-shrink: 0; }
+.tag-ink { border-color: var(--color-obsidian); }
+.tag-quiet { border-color: var(--color-hairline-soft); color: var(--color-charcoal); }
+
+.tag-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* Status pills always carry the word as well as the colour. */
+.tag-good { color: var(--status-good);     border-color: var(--status-good);     background: var(--status-good-bg); }
+.tag-warn { color: var(--status-warn);     border-color: var(--status-warn);     background: var(--status-warn-bg); }
+.tag-crit { color: var(--status-critical); border-color: var(--status-critical); background: var(--status-crit-bg); }
+.tag-idle { color: var(--color-charcoal);  border-color: var(--color-hairline);  background: var(--status-idle-bg); }
+
+/* ---------------------------------------------------------------- inputs */
+.input {
+  width: 100%; padding: 11px 14px; border-radius: var(--radius-input);
+  border: 1px solid var(--color-hairline); background: var(--color-paper-white);
+  color: var(--color-obsidian); font-family: var(--font-display);
+  font-size: var(--text-body-sm); letter-spacing: -0.01em;
+  box-shadow: var(--shadow-subtle);
+  transition: border-color 0.2s var(--ease-out), box-shadow 0.24s var(--ease-out);
+}
+.input::placeholder { color: var(--color-slate); }
+.input:hover:not(:disabled) { border-color: var(--color-slate); }
+.input:focus { outline: none; border-color: var(--color-surgical-blue); box-shadow: var(--shadow-blue); }
+.input:disabled { opacity: 0.5; cursor: default; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > .t-eyebrow { padding-left: 2px; }
+
+/* A number stepper narrow enough to sit in a control row. */
+.input-num { width: 76px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------- drop zone */
+.dropzone {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px; border-radius: var(--radius-input);
+  border: 1px dashed var(--color-hairline); box-shadow: var(--shadow-subtle);
+  color: var(--color-charcoal); text-align: center;
+  transition: border-color 0.2s var(--ease-out), background-color 0.2s var(--ease-out);
+}
+.dropzone:hover { border-color: var(--color-slate); }
+.dropzone svg { color: var(--color-surgical-blue); }
+
+/* ------------------------------------------------------------- utilities */
+.u-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.u-col { display: flex; flex-direction: column; }
+.u-grow { flex: 1; min-width: 0; }
+.u-divider { height: 1px; background: var(--color-hairline-soft); border: 0; margin: 0; }
+.u-measure { max-width: 62ch; }
+.u-hidden { display: none !important; }
+
+/* The one decorative face in the system. Illustration only — never a label,
+   never a control, never anything a person has to read to operate the app. */
+.u-hand {
+  font-family: var(--font-hand); font-weight: 400;
+  letter-spacing: -0.01em; color: var(--color-ink);
+}
+
+/* Anything animated on entry starts hidden, so a reveal cannot flash its
+   final state for one frame before the timeline picks it up. The class is
+   removed by the motion layer once GSAP owns the element — and if JS never
+   runs at all, this rule is overridden below so the page is still readable. */
+[data-reveal] { will-change: transform, opacity; }
+.js-motion-ready [data-reveal]:not([data-reveal-done]) { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .js-motion-ready [data-reveal] { opacity: 1 !important; transform: none !important; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

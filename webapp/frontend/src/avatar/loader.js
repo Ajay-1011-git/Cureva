@@ -95,12 +95,20 @@ export async function loadAvatar(url) {
 /** Scene + camera framed on the loaded avatar. Ported from createIsolatedScene. */
 export function createScene(avatar, width, height) {
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0b0f14)
+  // Transparent, so the CSS daylight wash behind the canvas shows through and
+  // she is lit by the same sky the rest of the page uses. A painted scene
+  // background here would punch a flat rectangle into that gradient.
+  scene.background = null
   scene.add(avatar.gltfScene)
-  scene.add(new THREE.AmbientLight(0xffffff, 2.2))
-  const key = new THREE.DirectionalLight(0xffffff, 2.0)
+  // Hemisphere rather than flat ambient: white from above, the page's sky tint
+  // bouncing up from below, which keeps her from looking cut out on white.
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xd7e6f5, 2.4))
+  const key = new THREE.DirectionalLight(0xffffff, 1.9)
   key.position.set(1, 3, 4)
   scene.add(key)
+  const rim = new THREE.DirectionalLight(0xcfe2f2, 0.8)
+  rim.position.set(-2, 1.4, -3)
+  scene.add(rim)
 
   const box = new THREE.Box3().setFromObject(avatar.gltfScene)
   const centre = box.getCenter(new THREE.Vector3())

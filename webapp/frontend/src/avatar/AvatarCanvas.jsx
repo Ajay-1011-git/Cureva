@@ -4,6 +4,7 @@ import { loadAvatar, createScene } from './loader.js'
 import { applyGesture, beginGestureTransition, safeGesture } from './gestures.js'
 import { SpeechAmplitude } from './speech.js'
 import { applyIdleLife, applySpeakingMotion } from './idle.js'
+import Icon from '../components/Icon.jsx'
 
 /**
  * The avatar canvas (T1.31/T1.32). Loads avatar.glb once, mounts a three.js
@@ -43,7 +44,10 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null,
       stateRef.current.bones = avatar.bones
       const { scene, camera } = createScene(avatar, width, height)
 
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
+      // alpha, because createScene() leaves the scene background null and lets
+      // the CSS gradient behind the canvas be the sky.
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+      renderer.setClearAlpha(0)
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
       renderer.setSize(width, height)
       el.innerHTML = ''
@@ -139,9 +143,30 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null,
   return (
     <div className="avatar-canvas-wrap">
       <div ref={mountRef} className="avatar-canvas-mount" />
-      {status === 'loading' && <div className="avatar-status">loading avatar…</div>}
-      {status === 'error' && <div className="avatar-status avatar-status-error">avatar failed to load</div>}
-      {speaking && <div className="avatar-speaking">speaking</div>}
+
+      <span className="avatar-badge">
+        <Icon name="user" size={12} />
+        Atlas
+      </span>
+
+      {status === 'loading' && (
+        <div className="avatar-status">
+          <span className="ask-thinking"><i /><i /><i /></span> loading avatar…
+        </div>
+      )}
+      {status === 'error' && (
+        <div className="avatar-status avatar-status-error">
+          <Icon name="alert" size={15} /> avatar failed to load
+        </div>
+      )}
+
+      {speaking && (
+        <span className="avatar-badge avatar-badge-right is-speaking">
+          <span className="wave"><i /><i /><i /><i /><i /></span>
+          speaking
+        </span>
+      )}
+
       {report && (
         <div className="avatar-report">
           {report.mappedCount} bones mapped · {report.animationCount === 0 ? 'procedural gestures' : `${report.animationCount} clips`}

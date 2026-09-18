@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
+import gsap from 'gsap'
+import Icon from './Icon.jsx'
+import { familyOf, intFor, labelFor, CODE_BLURB } from '../lib/findingCodes.js'
 
 /**
  * Act 2 — the finding graph in 3D.
@@ -8,8 +11,7 @@ import * as THREE from 'three'
  * shows the real picture (~190 findings) on first load; a conversation then
  * adds to it visibly.
  *
- * Two layout decisions worth stating, because the obvious versions both look
- * wrong:
+ * Three decisions worth stating, because the obvious versions all look wrong:
  *
  *  - **Connected clusters get a sphere each, placed on a Fibonacci shell.**
  *    A force simulation was the first instinct and is the wrong tool: with
@@ -22,24 +24,17 @@ import * as THREE from 'three'
  *    uniform noise. Pushing them to a halo says what is true: these are real
  *    findings with no relationship to anything else, and the structure in the
  *    middle is the part that means something.
+ *  - **Colour carries the family, not the code.** Twelve hues cannot survive
+ *    an all-pairs colour-blindness check, and in a rotating 3D scene any two
+ *    nodes can end up side by side, so all-pairs is the honest test. Five
+ *    validated hues plus a reserved neutral; the code name is always one
+ *    hover away and always on the filter chip. See lib/findingCodes.js.
+ *
+ * The scene is lit like the rest of the product — daylight on paper, a light
+ * fog so distance reads as depth rather than as a smaller dot.
  */
 
-const CODE_COLOURS = {
-  HYS_LAW_CANDIDATE: 0xef5350,
-  SAE_MISCODED: 0xff7043,
-  EXCLUSION_VIOLATION: 0xffa726,
-  INCLUSION_VIOLATION: 0xffca28,
-  DOSING_ERROR: 0xab47bc,
-  PROHIBITED_CONMED: 0x7e57c2,
-  AE_BEFORE_FIRST_DOSE: 0x42a5f5,
-  DUPLICATE_SUBJECT: 0x26c6da,
-  MISSING_EXPOSURE_RECORD: 0x26a69a,
-  LAB_UNIT_MISMATCH: 0x66bb6a,
-  VISIT_OUT_OF_WINDOW: 0x78909c,
-  PATIENT_REPORTED: 0x4fc3f7,
-}
-const colourFor = (code) => CODE_COLOURS[code] ?? 0x8a97a6
-export const hexFor = (code) => '#' + colourFor(code).toString(16).padStart(6, '0')
+const SURFACE = 0xf5f5f5
 
 /** Deterministic cluster layout. Returns finding_id -> THREE.Vector3. */
 function layout3d(nodes, clusters) {
@@ -95,6 +90,7 @@ export default function FindingGraph3D({ snapshot, subject, newIds,
   const mountRef = useRef(null)
   const stateRef = useRef({})
   const [hover, setHover] = useState(null)
+  const builtOnce = useRef(false)
 
   const pos = useMemo(
     () => layout3d(snapshot.nodes, snapshot.clusters), [snapshot])
@@ -107,7 +103,11 @@ export default function FindingGraph3D({ snapshot, subject, newIds,
     const height = el.clientHeight || 520
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x080b0f)
+    scene.background = new THREE.Color(SURFACE)
+    // Distance reads as haze rather than as a smaller dot, which is what makes
+    // the outer halo look like a shell instead of a scatter of specks.
+    scene.fog = new THREE.Fog(SURFACE, 118, 300)
+
     const camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 2000)
     camera.position.set(0, 26, 132)
 
@@ -117,10 +117,15 @@ export default function FindingGraph3D({ snapshot, subject, newIds,
     el.innerHTML = ''
     el.appendChild(renderer.domElement)
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.7))
-    const key = new THREE.DirectionalLight(0xffffff, 1.4)
-    key.position.set(40, 60, 80)
+    // Daylight on paper: a cool sky above, the page's own tint bouncing back
+    // from below, and one soft key so spheres still read as spheres.
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xd7e6f5, 2.1))
+    const key = new THREE.DirectionalLight(0xffffff, 1.5)
+    key.position.set(40, 70, 90)
     scene.add(key)
+    const fill = new THREE.DirectionalLight(0xdce9f6, 0.7)
+    fill.position.set(-60, -20, -40)
+    scene.add(fill)
 
     const group = new THREE.Group()
     scene.add(group)
@@ -185,7 +190,16 @@ export default function FindingGraph3D({ snapshot, subject, newIds,
         const hit = raycaster.intersectObjects(st.pickables, false)[0]
         const id = hit?.object?.userData?.finding_id ?? null
         if (id !== st.hovered) {
+          // Lift the node the pointer is on, and put the previous one back.
+          if (st.hoveredMesh) gsap.to(st.hoveredMesh.scale, {
+            x: st.hoveredMesh.userData.r, y: st.hoveredMesh.userData.r,
+            z: st.hoveredMesh.userData.r, duration: 0.25, ease: 'power2.out' })
           st.hovered = id
+          st.hoveredMesh = hit?.object || null
+          if (st.hoveredMesh) {
+            const r = st.hoveredMesh.userData.r * 1.55
+            gsap.to(st.hoveredMesh.scale, { x: r, y: r, z: r, duration: 0.25, ease: 'back.out(2)' })
+          }
           setHover(id)
           renderer.domElement.style.cursor = id ? 'pointer' : 'grab'
         }
@@ -223,6 +237,9 @@ export default function FindingGraph3D({ snapshot, subject, newIds,
     const st = stateRef.current
     if (!st.group) return
     const { group } = st
+    // A hovered mesh from the previous build is about to be disposed; drop the
+    // reference first or the next hover tween writes to a dead object.
+    st.hoveredMesh = null
     while (group.children.length) {
       const c = group.children.pop()
       c.geometry?.dispose?.()
@@ -245,61 +262,97 @@ export default function FindingGraph3D({ snapshot, subject, newIds,
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(edgePoints, 3))
       group.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({
-        color: 0x3a4a5e, transparent: true, opacity: 0.55 })))
+        color: 0x9aa4b2, transparent: true, opacity: 0.5, fog: true })))
     }
 
-    const sphere = new THREE.SphereGeometry(1, 14, 12)
+    const sphere = new THREE.SphereGeometry(1, 16, 13)
+    const meshes = []
     shown.forEach((n) => {
       const p = pos.get(n.finding_id)
       if (!p) return
       const isSubject = n.usubjid === subject
       const isNew = newIds.has(n.finding_id)
       const isSelected = n.finding_id === selectedId
+      const marked = isSubject || isNew || isSelected
       const hub = snapshot.centrality[n.finding_id] || 0
       const r = 1.25 + Math.min(2.2, hub * 26) + (isSubject ? 0.7 : 0)
 
+      // On a light surface, emphasis is opacity and size — not glow. An
+      // emissive node on white just looks washed out, which reads as *less*
+      // important rather than more.
       const mat = new THREE.MeshStandardMaterial({
-        color: colourFor(n.code),
-        emissive: colourFor(n.code),
-        emissiveIntensity: isSubject || isNew || isSelected ? 0.85 : 0.18,
-        roughness: 0.45,
+        color: intFor(n.code),
+        roughness: 0.52,
+        metalness: 0.0,
+        transparent: true,
+        opacity: marked ? 1 : 0.82,
       })
       const mesh = new THREE.Mesh(sphere, mat)
       mesh.position.copy(p)
       mesh.scale.setScalar(r)
-      mesh.userData = { finding_id: n.finding_id }
+      mesh.userData = { finding_id: n.finding_id, r }
       group.add(mesh)
       pickables.push(mesh)
+      meshes.push(mesh)
 
       // A ring marks anything belonging to the current subject, anything the
       // conversation just added, and whatever is selected — the three things
-      // a viewer needs to find instantly.
-      if (isSubject || isNew || isSelected) {
+      // a viewer needs to find instantly. Obsidian for "this subject", the
+      // accent for "said just now", so the two never blur together.
+      if (marked) {
         const ring = new THREE.Mesh(
-          new THREE.SphereGeometry(1, 14, 12),
+          new THREE.SphereGeometry(1, 16, 13),
           new THREE.MeshBasicMaterial({
-            color: isNew ? 0x4fc3f7 : isSelected ? 0xffffff : 0xdddddd,
-            transparent: true, opacity: 0.22, wireframe: true }))
+            color: isNew ? 0x2597d0 : isSelected ? 0x070709 : 0x60606c,
+            transparent: true, opacity: isNew ? 0.4 : 0.26, wireframe: true, fog: true }))
         ring.position.copy(p)
         ring.scale.setScalar(r * 2.1)
         group.add(ring)
       }
     })
     st.pickables = pickables
+
+    // Pop the nodes in from the centre outward the first time the graph
+    // appears. On a filter change the set is already familiar, so it just
+    // fades — re-staggering 190 spheres every time you click a chip would be
+    // a performance you have to sit through rather than information.
+    if (meshes.length) {
+      if (!builtOnce.current) {
+        builtOnce.current = true
+        gsap.from(meshes.map((m) => m.scale), {
+          x: 0, y: 0, z: 0, duration: 0.85, ease: 'back.out(1.6)',
+          stagger: { amount: 0.9, from: 'center' },
+        })
+      } else {
+        gsap.from(meshes.map((m) => m.material), {
+          opacity: 0, duration: 0.35, ease: 'power2.out',
+        })
+      }
+    }
   }, [snapshot, pos, subject, newIds, codeFilter, selectedId])
 
   const hoveredNode = hover && snapshot.nodes.find((n) => n.finding_id === hover)
+  const hoveredFamily = hoveredNode && familyOf(hoveredNode.code)
 
   return (
-    <div className="fg3d-wrap">
-      <div ref={mountRef} className="fg3d-mount" data-testid="finding-graph-3d" />
-      <div className="fg3d-hint">drag to rotate · scroll to zoom · click a node</div>
+    <div className="graph-stage">
+      <div ref={mountRef} className="graph-mount" data-testid="finding-graph-3d" />
+
+      <div className="graph-hud">
+        <Icon name="layers" size={12} />
+        drag to rotate · scroll to zoom · click a node
+      </div>
+
       {hoveredNode && (
-        <div className="fg3d-hover">
-          <b style={{ color: hexFor(hoveredNode.code) }}>
-            {hoveredNode.code.replace(/_/g, ' ')}
-          </b>
-          {' · '}{hoveredNode.usubjid || hoveredNode.site}
+        <div className="graph-hover">
+          <span className="graph-hover-code">
+            <i style={{ background: hoveredFamily.color }} />
+            {labelFor(hoveredNode.code)}
+          </span>
+          <div className="graph-hover-meta">
+            {hoveredFamily.label} · {hoveredNode.usubjid || hoveredNode.site}
+            {CODE_BLURB[hoveredNode.code] && <> — {CODE_BLURB[hoveredNode.code]}</>}
+          </div>
         </div>
       )}
     </div>

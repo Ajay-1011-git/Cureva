@@ -98,7 +98,7 @@ Sarvam STT/TTS + Groq dual-output  networkx: FindingNode/Edge over
 | Unit conversion | `standardise_lab()` keyed on the record's **own** `LBORRESU`, never the subject's site | The local-laboratory row exists in `reference_ranges.csv` because that lab reports differently — inferring "site S07 is the exception" instead of reading the unit off the record would silently break on a hidden study whose local lab sits elsewhere |
 | Protocol rules | Parsed live from the active document's text (`ProtocolRules`), not cached constants | Verified live: editing `protocol_v3.md`'s `"> 3 × ULN"` to `"> 30 × ULN"` on disk changed the Hy's law answer to `[]`; restoring the file restored it. No stale-protocol risk after a mid-run amendment |
 | Finding graph (Act 2) | networkx | Small graph — dozens of findings in one demo session, not 27k records; `connected_components`/`pagerank` in a few lines beats hand-rolled union-find here |
-| Backend / Frontend | FastAPI / React+Router+GSAP | Async-friendly for Sarvam/Groq calls; three animation-heavy navigable pages is exactly GSAP+routing's job |
+| Backend / Frontend | FastAPI / React+Router+GSAP+Framer Motion | Async-friendly for Sarvam/Groq calls; three animation-heavy navigable pages is exactly GSAP+routing's job. GSAP drives timelines, scroll reveals and the three.js scenes; Framer Motion covers the one thing GSAP cannot do for a React-owned subtree — animating a component *out* as it unmounts (the deliberation overlay, the subject menu, gate rows leaving on a filter change) |
 | LLM (Act 1) | Groq `openai/gpt-oss-20b`, explicit `reasoning_effort` | Sub-second latency for a conversational turn; empty-content-without-`reasoning_effort` is a documented failure mode on this model family |
 | Speech (Act 1) | Sarvam `saaras:v3` (STT, `mode=translate`) / `bulbul:v3` (TTS, female voice), multi-account key pool | Paid but kept per product decision; pool rotates across accounts on 429/insufficient-credit rather than going silent mid-demo. `mode=translate` means a patient can speak any supported language and the transcript still comes back usable. Voice defaults to a female speaker (`SARVAM_TTS_SPEAKER` overrides) — bulbul's own default, `shubh`, is male |
 
@@ -125,6 +125,69 @@ A detector returns `[]` exactly as-is when that's genuinely true — no "are you
 ## Graph
 
 `StudyGraph` itself is **not** a graph library — dict-of-lists indices keyed by `(domain, usubjid[, seq])`, per the organiser's own guidance that a real graph library's per-build cost isn't affordable at 27k-record scale. Act 2's finding graph (`graph/`, backend-only, observing `Atlas`'s own output) *is* built with networkx: nodes are `Finding`s deduplicated by `(code, usubjid)`, edges connect findings sharing a protocol section, a drug class, temporal proximity, or an amendment. Statistics are in `graph_stats.json`.
+
+## Design system
+
+The interface follows one reference: a light clinical system — a sky-gradient
+hero band at the top of a page, then a calm white workspace. It is 99%
+monochrome. Near-black (`#070709`) is the text colour *and* the action colour,
+so every filled button is near-black and never chromatic. Exactly one vivid
+blue (`#2597d0`, "surgical blue") is spent on functional punctuation: icons
+under ~16px, the microphone, the recording waveform, and the patient's own
+voice in the finding graph. It is never a button fill, never a large surface,
+and never a run of body copy.
+
+Everything is a token, in `src/styles/tokens.css`; `base.css` turns those into
+the reset and the handful of primitives (`.btn`, `.card`, `.tag`, `.input`,
+`.dropzone`) that the three feature sheets — `shell.css`, `atlas.css`,
+`review.css` — compose. No component declares a raw colour, radius or shadow.
+Open Runde, Inter and Caveat are self-hosted via `@fontsource`, so the demo
+renders identically with no network.
+
+Two places the reference was deliberately not followed, both for legibility:
+
+- **The hero gradient is stepped deeper.** The reference wash
+  (`#779bc1 → #9abfda → #cbdcec`) puts white body copy at 2.9:1 at the top and
+  1.9:1 by the middle — under the 3:1 floor for large text, let alone the
+  4.5:1 the 18px subtext needs. The wash keeps its shape and its near-white
+  landing into the page; the upper four fifths are darkened so every word in
+  the hero clears 4.5:1.
+- **The page measure is split.** Prose and hero copy hold to the reference's
+  1200px. The two tool surfaces — a 3D graph beside a detail panel, a worklist
+  beside a deliberation — get 1440px, because the alternative was shrinking the
+  type to fit rather than the layout.
+
+### Colour in the finding graph
+
+Twelve finding codes cannot each hold a distinguishable hue. In a rotating 3D
+scene any two nodes can end up adjacent, so the honest test is all-pairs
+colour-blindness separation, and that caps a palette at a handful of hues
+however they are picked. So **colour carries the family and the word carries
+the code**: five validated hues plus one reserved neutral
+(`src/lib/findingCodes.js`), with the code name always present on the filter
+chip, in the hover label and in the detail panel.
+
+The five were validated all-pairs against white — worst CVD ΔE 9.1 (target ≥8),
+worst normal-vision ΔE 16.5 (floor ≥15). Amber and aqua sit under 3:1 on white,
+which is why the labels are not optional. `VISIT_OUT_OF_WINDOW` takes the
+neutral deliberately: it is ~150 of the ~190 findings and has no edges, so it
+is the baseline the picture is read against, not one signal among five —
+giving the loudest colour to the least informative category would invert the
+whole graph.
+
+Status colours (approved / pending / rejected, ESCALATE / MONITOR) are a
+separate reserved scale, never reused for a category, and always shipped with
+the word and a glyph rather than colour alone.
+
+### Motion
+
+All of it goes through `src/lib/motion.js`, so three things are true
+everywhere: `prefers-reduced-motion` still *sets* the final state rather than
+skipping a timeline that would leave elements at opacity 0; nothing flashes
+before it animates, because the hide-then-reveal CSS rule only applies while
+the motion layer has marked the document; and every trigger is scoped to a
+`gsap.context` that reverts on unmount, which is what keeps React 19's
+StrictMode double-mount from pinning a page invisible.
 
 ## Pages
 

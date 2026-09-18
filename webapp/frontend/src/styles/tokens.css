@@ -1,0 +1,180 @@
+/* ============================================================================
+   Design tokens — "morning clinic under open sky".
+   ----------------------------------------------------------------------------
+   One atmospheric sky band at the top of a page, then a calm white workspace.
+   The system is 99% monochrome: near-black text, near-black pill CTAs, white
+   cards on hairline shadows. Exactly one vivid blue is spent on functional
+   punctuation — icons, the mic, the waveform, the patient's own voice in the
+   graph — and never on a button fill or a large surface.
+
+   Everything below is a token. No component should invent a colour, a radius
+   or a shadow; if one is missing, add it here so the next component inherits
+   it too.
+   ========================================================================= */
+
+/* Self-hosted so the demo renders identically with no network. Open Runde is
+   the real display face named by the design; Inter carries small UI labels;
+   Caveat stands in for the clinical-handwriting face and is decorative only. */
+@import '@fontsource/open-runde/400.css';
+@import '@fontsource/open-runde/500.css';
+@import '@fontsource/open-runde/600.css';
+@import '@fontsource/open-runde/700.css';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/caveat';
+
+:root {
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------- colour */
+  --color-obsidian:       #070709;  /* primary text, filled CTAs            */
+  --color-ink:            #151515;  /* headings — softer than obsidian      */
+  --color-charcoal:       #60606c;  /* body copy, 6.2:1 on white            */
+  --color-slate:          #8b8b8b;  /* tertiary text, inactive borders      */
+  --color-paper-white:    #ffffff;
+  --color-cloud-gray:     #f5f5f5;
+  --color-sky-tint:       #d7e6f5;
+  --color-surgical-blue:  #2597d0;  /* icons + micro-graphics ONLY          */
+  --color-sky-gradient:   #779bc1;
+
+  /* 3.27:1 — fine for a 2px icon stroke, not for a sentence. Any blue that
+     has to be *read* uses the ink step instead (4.43:1). */
+  --color-surgical-blue-ink: #1b7fb4;
+
+  --color-hairline:       #bebecc;  /* the border colour, everywhere        */
+  --color-hairline-soft:  #e8e8ee;
+
+  /* The reference gradient (#779bc1 -> #9abfda -> #cbdcec) puts white body copy
+     at 2.9:1 near the top and 1.9:1 by the middle — below the 3:1 floor for
+     large text, let alone the 4.5:1 the 18px subtext needs. The wash keeps its
+     shape and its near-white landing, but the upper four fifths are stepped
+     deeper so every word in the hero clears 4.5:1. The pale end is preserved
+     where it does its actual job: the seam into the white page. */
+  --gradient-sky: linear-gradient(180deg,
+    #3b658d 0%,    /* white 6.1:1 */
+    #426d96 48%,   /* white 5.4:1 */
+    #4b77a2 78%,   /* white 4.7:1 — the lowest point any copy reaches */
+    #7ea6cb 90%,
+    #cbdcec 100%);
+
+  /* --------------------------------------------------------- surfaces */
+  --surface-sky:       #779bc1;
+  --surface-paper:     #ffffff;
+  --surface-cloud:     #f5f5f5;
+  --surface-sky-tint:  #d7e6f5;
+  --surface-obsidian:  #070709;
+
+  /* ------------------------------------------------------------ status
+     Reserved. These four never stand in for a category colour, and they are
+     never the only signal — every place they appear also carries the word
+     (APPROVED, ESCALATE) and a glyph. Text steps are >= 5:1 on white. */
+  --status-good:      #1a7f4f;
+  --status-good-bg:   rgba(26, 127, 79, 0.09);
+  --status-warn:      #a15c00;
+  --status-warn-bg:   rgba(161, 92, 0, 0.09);
+  --status-critical:  #c62828;
+  --status-crit-bg:   rgba(198, 40, 40, 0.09);
+  --status-idle:      #60606c;
+  --status-idle-bg:   rgba(96, 96, 108, 0.07);
+
+  /* ------------------------------------------------- categorical palette
+     For the finding graph. Twelve finding codes cannot each hold a hue that
+     survives an all-pairs colour-blindness check, so colour carries the
+     *family* and the code name is always present as text — on the filter
+     chip, on hover, and in the detail panel. Five hues + one reserved
+     neutral, validated all-pairs on white (worst CVD dE 9.1, normal-vision
+     16.5). Slot 1 is the brand blue and belongs to the patient's own voice.  */
+  --cat-patient:    #2597d0;   /* what the person said, live               */
+  --cat-safety:     #c62828;   /* is someone being harmed                  */
+  --cat-eligible:   #eda100;   /* should they have been enrolled           */
+  --cat-integrity:  #1baf7a;   /* do the records agree with themselves     */
+  --cat-treatment:  #4a3aa7;   /* what they were given                     */
+  --cat-conduct:    #8b8b8b;   /* protocol timing — the baseline noise     */
+
+  /* -------------------------------------------------------- typography */
+  --font-display: 'Open Runde', ui-sans-serif, system-ui, -apple-system,
+                  BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-ui:      'Inter Variable', 'Inter', ui-sans-serif, system-ui,
+                  -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-hand:    'Caveat Variable', 'Caveat', cursive;
+  --font-mono:    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  --text-caption:    12px;  --leading-caption:    1.2;   --tracking-caption:    -0.01em;
+  --text-body-sm:    14px;  --leading-body-sm:    1.4;   --tracking-body-sm:    -0.01em;
+  --text-body:       16px;  --leading-body:       1.49;  --tracking-body:       -0.01em;
+  --text-body-lg:    18px;  --leading-body-lg:    1.4;   --tracking-body-lg:    -0.01em;
+  --text-subheading: 20px;  --leading-subheading: 1.4;   --tracking-subheading: -0.02em;
+  --text-heading-sm: 28px;  --leading-heading-sm: 1.2;   --tracking-heading-sm: -0.04em;
+  --text-heading:    44px;  --leading-heading:    1.1;   --tracking-heading:    -0.04em;
+  --text-display:    80px;  --leading-display:    0.9;   --tracking-display:    -0.04em;
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ----------------------------------------------------------- spacing */
+  --space-4: 4px;    --space-8: 8px;    --space-12: 12px;  --space-16: 16px;
+  --space-20: 20px;  --space-24: 24px;  --space-28: 28px;  --space-32: 32px;
+  --space-36: 36px;  --space-40: 40px;  --space-52: 52px;  --space-56: 56px;
+  --space-80: 80px;  --space-96: 96px;  --space-100: 100px; --space-120: 120px;
+
+  /* ------------------------------------------------------------ radius */
+  --radius-icon:   8px;
+  --radius-input:  12px;
+  --radius-card:   18px;
+  --radius-panel:  24px;
+  --radius-large:  32px;
+  --radius-xlarge: 40px;
+  --radius-pill:   100px;
+
+  /* ----------------------------------------------------------- shadows
+     Large radii at very low opacity, tinted blue rather than gray, so a card
+     looks lifted by daylight instead of outlined in soot. */
+  --shadow-subtle: rgba(228, 229, 231, 0.24) 0 1px 2px 0;
+  --shadow-button:
+    rgba(36, 36, 40, 0.10) 0 1px 2px 0,
+    rgba(36, 36, 40, 0.09) 0 3px 3px 0,
+    rgba(36, 36, 40, 0.05) 0 6px 4px 0,
+    rgba(36, 36, 40, 0.01) 0 11px 4px 0;
+  --shadow-button-lift:
+    rgba(36, 36, 40, 0.12) 0 2px 4px 0,
+    rgba(36, 36, 40, 0.10) 0 6px 8px 0,
+    rgba(36, 36, 40, 0.06) 0 12px 14px 0,
+    rgba(36, 36, 40, 0.02) 0 22px 18px 0;
+  --shadow-blue: rgba(23, 107, 197, 0.08) 0 1px 1px 0,
+                 rgba(23, 107, 197, 0.07) 0 3px 3px 0;
+  --shadow-card:
+    rgba(16, 55, 132, 0.03) 0 17px 37px 0,
+    rgba(16, 55, 132, 0.03) 0 67px 67px 0,
+    rgba(16, 55, 132, 0.02) 0 150px 90px 0;
+  --shadow-menu:
+    rgba(16, 55, 132, 0.06) 0 8px 18px 0,
+    rgba(16, 55, 132, 0.05) 0 24px 40px 0,
+    rgba(16, 55, 132, 0.03) 0 60px 70px 0;
+
+  /* ------------------------------------------------------------ layout
+     The design's page measure is 1200px, and prose and hero copy hold to it.
+     The two tool surfaces — a 3D graph beside a detail panel, a worklist
+     beside a deliberation — are unreadable squeezed that narrow, so they get
+     their own wider measure rather than shrinking the type to fit. */
+  --page-max:      1200px;
+  --workspace-max: 1440px;
+  --gutter:        28px;
+  --section-gap:   96px;
+  --card-padding:  40px;
+
+  /* -------------------------------------------------------------- ease */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@media (max-width: 720px) {
+  :root {
+    --text-display: 44px;
+    --text-heading: 32px;
+    --text-heading-sm: 24px;
+    --gutter: 18px;
+    --section-gap: 56px;
+    --card-padding: 24px;
+  }
+}

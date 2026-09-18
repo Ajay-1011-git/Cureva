@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import gsap from 'gsap'
+import Icon from './Icon.jsx'
+import { gsap, reducedMotion } from '../lib/motion.js'
 
 // Same convention the rest of the app uses (Atlas.jsx): the backend's origin
 // comes from the environment, because there is no dev-server proxy. A bare
 // "/api/..." would resolve against vite's own origin and 404.
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
+const EXAMPLES = [
+  "Which subjects meet Hy's law criteria?",
+  'How many subjects at site S11 discontinued due to an adverse event?',
+  'Is any subject enrolled at more than one site?',
+]
+
 /**
- * A floating question box, bottom-right. Collapsed it is a small pill; on
- * hover it grows and the page behind it blurs back.
+ * A floating question box, bottom-right. Collapsed it is an obsidian pill —
+ * the same shape as every other call to action; on hover it grows into a
+ * white card and the page behind it recedes.
  *
  * Two behaviours that hover alone would get wrong:
  *
@@ -16,8 +24,9 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
  *    pointer leaves. A panel that collapsed mid-sentence, or that threw away
  *    an answer because the mouse drifted, would be unusable for the one thing
  *    it exists to do. Escape or a click outside closes it.
- *  - The blur is applied to the page, not painted over it, so the answer sits
- *    on an unblurred surface while everything behind recedes.
+ *  - The scrim blurs the page rather than the app blurring itself, so the
+ *    answer sits on an unblurred surface while everything behind recedes —
+ *    and no fixed-position child of the app is broken by a filter.
  *
  * Questions go to /api/atlas/ask with empty params, so the backend resolves
  * the sentence through Atlas's own deterministic text path. No model is
@@ -32,36 +41,33 @@ export default function AskPanel() {
 
   const rootRef = useRef(null)
   const cardRef = useRef(null)
+  const scrimRef = useRef(null)
   const inputRef = useRef(null)
 
   const expanded = open || pinned
 
-  // Grow/shrink the card, and blur the page behind it.
+  // Grow/shrink the card, and fade the scrim over the page behind it.
   useEffect(() => {
     const card = cardRef.current
+    const scrim = scrimRef.current
     if (!card) return
-    const shell = document.querySelector('.app-shell')
+    const instant = reducedMotion() ? 0 : undefined
 
     gsap.to(card, {
-      width: expanded ? 420 : 132,
-      height: expanded ? 'auto' : 44,
-      duration: 0.42,
+      width: expanded ? 440 : 156,
+      height: expanded ? 'auto' : 46,
+      duration: instant ?? 0.46,
       ease: expanded ? 'power3.out' : 'power2.inOut',
     })
-    if (shell) {
-      gsap.to(shell, {
-        filter: expanded ? 'blur(5px)' : 'blur(0px)',
-        opacity: expanded ? 0.45 : 1,
-        duration: 0.42,
-        ease: 'power2.out',
-      })
+    if (scrim) {
+      gsap.to(scrim, { opacity: expanded ? 1 : 0, duration: instant ?? 0.42, ease: 'power2.out' })
     }
   }, [expanded])
 
-  // Focus the input once it is actually visible, not while it is 132px wide.
+  // Focus the input once it is actually visible, not while it is 156px wide.
   useEffect(() => {
     if (expanded) {
-      const t = setTimeout(() => inputRef.current?.focus(), 180)
+      const t = setTimeout(() => inputRef.current?.focus(), 190)
       return () => clearTimeout(t)
     }
   }, [expanded])
@@ -70,11 +76,12 @@ export default function AskPanel() {
   // since an unpinned panel closes itself when the pointer leaves.
   useEffect(() => {
     if (!pinned) return
-    const onKey = (e) => { if (e.key === 'Escape') { setPinned(false); setOpen(false) } }
+    const close = () => { setPinned(false); setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') close() }
     const onClick = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) {
-        setPinned(false); setOpen(false)
-      }
+      if (rootRef.current && !rootRef.current.contains(e.target)) close()
+      // A click on the scrim is inside .ask-root but outside the card.
+      else if (cardRef.current && !cardRef.current.contains(e.target)) close()
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('mousedown', onClick)
@@ -108,10 +115,20 @@ export default function AskPanel() {
   }, [text, busy])
 
   const renderAnswer = () => {
-    if (busy) return <div className="ask-status">thinking…</div>
+    if (busy) {
+      return (
+        <div className="ask-status">
+          <span className="ask-thinking"><i /><i /><i /></span> reading the graph…
+        </div>
+      )
+    }
     if (!answer) return null
     if (answer._error) {
-      return <div className="ask-status ask-error">could not reach the backend — {answer._error}</div>
+      return (
+        <div className="ask-status ask-status-err">
+          could not reach the backend — {answer._error}
+        </div>
+      )
     }
 
     const value = answer.answer
@@ -120,7 +137,7 @@ export default function AskPanel() {
     return (
       <div className="ask-answer">
         {unresolved ? (
-          <div className="ask-status ask-error">{answer.text}</div>
+          <div className="ask-status ask-status-err">{answer.text}</div>
         ) : (
           <>
             <div className="ask-value">
@@ -159,26 +176,31 @@ export default function AskPanel() {
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => { if (!pinned) setOpen(false) }}
     >
+      <div ref={scrimRef} className={`ask-scrim ${expanded ? 'is-on' : ''}`} />
+
       <div ref={cardRef} className={`ask-card ${expanded ? 'is-open' : ''}`}>
         {!expanded ? (
           <div className="ask-pill">
-            <span className="ask-dot" />
+            <Icon name="sparkle" size={15} />
             Ask Atlas
           </div>
         ) : (
-          <div className="ask-body">
+          <div className="ask-body u-scroll">
             <div className="ask-head">
-              <span>Ask Atlas</span>
+              <span className="ask-head-title">
+                <Icon name="sparkle" size={16} />
+                <span>Ask Atlas</span>
+              </span>
               <button
-                className="ask-close"
+                className="ask-icon-btn"
                 onClick={() => { setPinned(false); setOpen(false) }}
                 aria-label="Close"
-              >×</button>
+              ><Icon name="close" size={15} /></button>
             </div>
 
             <input
               ref={inputRef}
-              className="ask-input"
+              className="input"
               value={text}
               onChange={(e) => setText(e.target.value)}
               onFocus={() => setPinned(true)}
@@ -187,16 +209,15 @@ export default function AskPanel() {
             />
 
             <div className="ask-examples">
-              {[
-                "Which subjects meet Hy's law criteria?",
-                'How many subjects at site S11 discontinued due to an adverse event?',
-                'Is any subject enrolled at more than one site?',
-              ].map((example) => (
+              {EXAMPLES.map((example) => (
                 <button
                   key={example}
                   className="ask-example"
                   onClick={() => { setText(example); setPinned(true) }}
-                >{example}</button>
+                >
+                  <Icon name="arrowRight" size={13} />
+                  {example}
+                </button>
               ))}
             </div>
 

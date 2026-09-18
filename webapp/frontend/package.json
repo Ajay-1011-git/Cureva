@@ -10,7 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/caveat": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/open-runde": "^5.3.0",
     "@pixiv/three-vrm": "^3.5.5",
+    "framer-motion": "^13.4.0",
     "gsap": "^3.15.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

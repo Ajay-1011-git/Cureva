@@ -1,0 +1,311 @@
+/* ============================================================================
+   The shell: navigation, the sky hero band, the page frame, and the floating
+   Ask panel that follows you across both pages.
+   ========================================================================= */
+
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ------------------------------------------------------------ navigation */
+.nav {
+  position: sticky; top: 0; z-index: 60;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--color-hairline-soft);
+  transition: box-shadow 0.3s var(--ease-out), border-color 0.3s var(--ease-out);
+}
+/* Only once the page has actually moved — a bar that is shadowed at rest
+   looks detached from a hero it is sitting directly on top of. */
+.nav.is-scrolled { box-shadow: rgba(16, 55, 132, 0.05) 0 1px 20px 0; border-bottom-color: var(--color-hairline); }
+
+.nav-inner {
+  max-width: var(--workspace-max); margin-inline: auto;
+  padding: 12px var(--gutter);
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+}
+
+.nav-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.nav-wordmark {
+  font-family: var(--font-display); font-size: 18px;
+  font-weight: var(--weight-semibold); letter-spacing: -0.03em;
+  color: var(--color-obsidian);
+}
+.nav-brand-sub {
+  font-family: var(--font-ui); font-size: var(--text-caption);
+  color: var(--color-slate); letter-spacing: -0.01em;
+  padding-left: 10px; margin-left: 2px; border-left: 1px solid var(--color-hairline);
+}
+
+/* The link cluster is a pill rail with one sliding indicator behind it,
+   rather than a per-link underline that pops between positions. */
+.nav-links { position: relative; display: flex; align-items: center; gap: 2px; padding: 3px; }
+.nav-indicator {
+  position: absolute; top: 3px; left: 0; height: calc(100% - 6px);
+  border-radius: var(--radius-pill); background: var(--color-cloud-gray);
+  pointer-events: none; opacity: 0;
+}
+.nav-link {
+  position: relative; z-index: 1;
+  font-family: var(--font-ui); font-size: var(--text-body-sm);
+  font-weight: var(--weight-medium); letter-spacing: -0.022em;
+  color: var(--color-charcoal); text-decoration: none;
+  padding: 8px 16px; border-radius: var(--radius-pill);
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: color 0.24s var(--ease-out);
+}
+.nav-link svg { color: var(--color-slate); transition: color 0.24s var(--ease-out); }
+.nav-link:hover { color: var(--color-obsidian); }
+.nav-link:hover svg { color: var(--color-surgical-blue); }
+.nav-link.active { color: var(--color-obsidian); }
+.nav-link.active svg { color: var(--color-surgical-blue); }
+
+.nav-actions { display: flex; align-items: center; gap: 10px; }
+
+/* A live dot that says the backend answered, not that the tab is open. */
+.nav-status {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-ui); font-size: var(--text-caption);
+  color: var(--color-charcoal); padding: 6px 14px;
+  border: 1px solid var(--color-hairline-soft); border-radius: var(--radius-pill);
+}
+.nav-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--color-slate); flex-shrink: 0; }
+.nav-status.is-live i { background: var(--status-good); box-shadow: 0 0 0 0 rgba(26, 127, 79, 0.45); animation: live-ping 2.6s var(--ease-out) infinite; }
+.nav-status.is-down i { background: var(--status-critical); }
+@keyframes live-ping {
+  0%   { box-shadow: 0 0 0 0 rgba(26, 127, 79, 0.45); }
+  70%  { box-shadow: 0 0 0 7px rgba(26, 127, 79, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(26, 127, 79, 0); }
+}
+
+@media (max-width: 860px) {
+  .nav-brand-sub, .nav-status { display: none; }
+  .nav-inner { gap: 10px; }
+  .nav-link { padding: 8px 12px; }
+}
+
+/* ---------------------------------------------------------- the sky hero
+   The one atmospheric moment in the system. It appears once per page, at the
+   top, and nowhere else — repeated below, the gradient stops meaning
+   "beginning" and starts meaning "decoration". */
+.hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  background: var(--gradient-sky);
+  padding-block: 76px 104px;
+  text-align: center;
+}
+/* The gradient's last stop is near-white, so the workspace below continues it
+   rather than butting against an edge. This seals the seam exactly. */
+.hero::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 120px;
+  background: linear-gradient(180deg, rgba(255,255,255,0) 0%, var(--color-paper-white) 100%);
+  z-index: -1; pointer-events: none;
+}
+
+/* Two slow, very low-contrast blooms drifting behind the copy. They are what
+   stop a flat linear-gradient from looking like a placeholder. */
+.hero-bloom {
+  position: absolute; border-radius: 50%; z-index: -1; pointer-events: none;
+  filter: blur(46px); opacity: 0.55;
+}
+.hero-bloom-a {
+  width: 640px; height: 420px; top: -180px; left: 50%;
+  background: radial-gradient(closest-side, rgba(255,255,255,0.85), rgba(255,255,255,0));
+}
+.hero-bloom-b {
+  width: 520px; height: 340px; bottom: -120px; left: 8%;
+  background: radial-gradient(closest-side, rgba(215,230,245,0.9), rgba(215,230,245,0));
+}
+.hero-bloom-c {
+  width: 460px; height: 300px; top: 20%; right: 4%;
+  background: radial-gradient(closest-side, rgba(255,255,255,0.6), rgba(255,255,255,0));
+}
+
+.hero-inner {
+  position: relative; z-index: 1;
+  max-width: var(--page-max); margin-inline: auto; padding-inline: var(--gutter);
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+}
+
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px; border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  font-family: var(--font-ui); font-size: 11px; font-weight: var(--weight-medium);
+  letter-spacing: 0.10em; text-transform: uppercase; color: #ffffff;
+}
+.hero-eyebrow svg { color: #ffffff; }
+
+.hero-title {
+  color: #ffffff; max-width: 17ch;
+  font-size: var(--text-display); line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display); font-weight: var(--weight-semibold);
+  text-wrap: balance;
+}
+.hero-sub {
+  color: rgba(255, 255, 255, 0.92); max-width: 52ch;
+  font-size: var(--text-body-lg); line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body); font-weight: var(--weight-regular);
+  text-wrap: pretty;
+}
+.hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+/* On the gradient, the ghost button needs a light border, not a dark one. */
+.hero-actions .btn-ghost { border-color: rgba(255,255,255,0.55); color: #ffffff; }
+.hero-actions .btn-ghost:hover:not(:disabled) { border-color: #ffffff; background: rgba(255,255,255,0.14); }
+
+/* Word-by-word rise. The mask clips the word's start position so it appears
+   to lift out of the line rather than fade in on top of it. */
+.split-mask { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: 0.08em; }
+.split-word { display: inline-block; will-change: transform; }
+
+@media (max-width: 720px) {
+  .hero { padding-block: 48px 72px; }
+  .hero-title { max-width: 100%; }
+}
+
+/* ------------------------------------------------------------ page frame */
+.page { display: flex; flex-direction: column; }
+.page-body { padding-block: 56px 96px; }
+.page-body-cloud { background: var(--color-cloud-gray); }
+
+/* A centred section heading above a grid — the layout rhythm is symmetrical. */
+.section-head {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  text-align: center; margin-bottom: 36px;
+}
+.section-head p { max-width: 58ch; color: var(--color-charcoal); }
+
+/* The same block, left-aligned, for a column heading inside the workspace
+   where a centred title would float away from the list it introduces. */
+.col-head { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.col-head h2 { font-size: var(--text-heading-sm); line-height: var(--leading-heading-sm); letter-spacing: var(--tracking-heading-sm); }
+.col-head p { color: var(--color-charcoal); font-size: var(--text-body-sm); line-height: 1.55; max-width: 56ch; }
+
+/* ------------------------------------------------------------- notice bar */
+.notice {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 13px 18px; border-radius: var(--radius-input);
+  border: 1px solid var(--color-hairline); background: var(--color-paper-white);
+  box-shadow: var(--shadow-subtle);
+  font-size: var(--text-body-sm); line-height: 1.5; color: var(--color-charcoal);
+}
+.notice svg { flex-shrink: 0; margin-top: 2px; }
+.notice-warn { border-color: var(--status-warn); background: var(--status-warn-bg); color: var(--status-warn); }
+.notice-crit { border-color: var(--status-critical); background: var(--status-crit-bg); color: var(--status-critical); }
+.notice strong { font-weight: var(--weight-semibold); }
+
+/* ------------------------------------------------------------- ask panel
+   A floating question box, bottom-right. Collapsed it is an obsidian pill —
+   the same shape language as every CTA; expanded it is a white card on the
+   card shadow. Width/height are animated by GSAP, never by a CSS transition,
+   so the two cannot fight over the same properties. */
+.ask-root { position: fixed; right: 24px; bottom: 24px; z-index: 90; }
+
+/* The page recedes behind the open panel. On a white system a blur alone is
+   almost invisible, so a white scrim carries most of the work and the blur
+   just softens the edges underneath it. */
+.ask-scrim {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0;
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(4px) saturate(120%);
+  -webkit-backdrop-filter: blur(4px) saturate(120%);
+}
+/* The scrim blurs what is behind it rather than the app filtering itself: a
+   filter on the shell would make it the containing block for every fixed
+   child inside it, which quietly breaks the full-screen deliberation. */
+.ask-scrim.is-on { pointer-events: auto; }
+
+.ask-card {
+  width: 156px; height: 46px; overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: var(--color-obsidian);
+  box-shadow: var(--shadow-button);
+  transition: background-color 0.42s var(--ease-out), box-shadow 0.42s var(--ease-out);
+}
+.ask-card.is-open {
+  background: var(--color-paper-white);
+  box-shadow: var(--shadow-menu);
+  border: 1px solid var(--color-hairline-soft);
+  /* GSAP sets an inline height while opening and wins over this, so the rule
+     costs nothing — but if the tween never runs the card would otherwise stay
+     46px tall and clip its own contents. */
+  height: auto;
+}
+
+.ask-pill {
+  display: flex; align-items: center; gap: 9px;
+  height: 46px; padding: 0 20px; white-space: nowrap;
+  font-family: var(--font-display); font-size: var(--text-body-sm);
+  font-weight: var(--weight-medium); color: var(--color-paper-white);
+}
+.ask-pill svg { color: var(--color-surgical-blue); }
+
+.ask-body { padding: 22px; max-height: min(70vh, 620px); overflow-y: auto; }
+.ask-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 14px;
+}
+.ask-head-title { display: inline-flex; align-items: center; gap: 8px; }
+.ask-head-title svg { color: var(--color-surgical-blue); }
+.ask-head-title span {
+  font-family: var(--font-display); font-size: var(--text-body);
+  font-weight: var(--weight-semibold); letter-spacing: -0.02em; color: var(--color-obsidian);
+}
+.ask-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%; color: var(--color-slate);
+  transition: background-color 0.2s var(--ease-out), color 0.2s var(--ease-out);
+}
+.ask-icon-btn:hover { background: var(--color-cloud-gray); color: var(--color-obsidian); }
+
+.ask-examples { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+.ask-example {
+  display: flex; align-items: flex-start; gap: 8px; text-align: left;
+  font-family: var(--font-ui); font-size: var(--text-caption);
+  color: var(--color-charcoal); line-height: 1.45;
+  padding: 7px 9px; border-radius: var(--radius-icon);
+  transition: background-color 0.2s var(--ease-out), color 0.2s var(--ease-out);
+}
+.ask-example svg { color: var(--color-hairline); flex-shrink: 0; margin-top: 2px; transition: color 0.2s var(--ease-out); }
+.ask-example:hover { background: var(--color-cloud-gray); color: var(--color-obsidian); }
+.ask-example:hover svg { color: var(--color-surgical-blue); }
+
+.ask-status { margin-top: 14px; color: var(--color-charcoal); font-size: var(--text-body-sm); line-height: 1.5; }
+.ask-status-err { color: var(--status-critical); }
+
+.ask-answer { margin-top: 16px; border-top: 1px solid var(--color-hairline-soft); padding-top: 14px; }
+.ask-value {
+  font-size: var(--text-subheading); font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em; line-height: 1.35; word-break: break-word; color: var(--color-obsidian);
+}
+.ask-meta { margin-top: 6px; color: var(--color-slate); font-family: var(--font-ui); font-size: var(--text-caption); }
+.ask-evidence {
+  list-style: none; margin: 11px 0 0; display: flex; flex-wrap: wrap; gap: 5px;
+}
+.ask-evidence li {
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-charcoal);
+  border: 1px solid var(--color-hairline-soft); border-radius: 6px; padding: 2px 7px;
+  background: var(--color-cloud-gray);
+}
+.ask-evidence li.ask-more { background: none; border-style: dashed; }
+.ask-text { margin-top: 12px; color: var(--color-charcoal); font-size: var(--text-body-sm); line-height: 1.55; }
+
+/* The "thinking" state: three dots that actually move, so a slow answer does
+   not read as a frozen panel. */
+.ask-thinking { display: inline-flex; align-items: center; gap: 5px; }
+.ask-thinking i {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--color-surgical-blue);
+  animation: ask-bounce 1.1s var(--ease-in-out) infinite;
+}
+.ask-thinking i:nth-child(2) { animation-delay: 0.14s; }
+.ask-thinking i:nth-child(3) { animation-delay: 0.28s; }
+@keyframes ask-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+
+@media (max-width: 560px) {
+  .ask-root { right: 14px; bottom: 14px; left: 14px; }
+}

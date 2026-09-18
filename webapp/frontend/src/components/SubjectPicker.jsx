@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import Icon from './Icon.jsx'
 
 /**
  * Chooses which enrolled subject the avatar is speaking to.
@@ -8,6 +10,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
  * enrolled subjects with enough context to pick one deliberately — site, arm,
  * demographics, how many findings already stand against them, and how many
  * things they have said in earlier conversations.
+ *
+ * The menu is animated with framer-motion rather than GSAP: it needs a real
+ * *exit* animation, and presence-on-unmount is the one thing GSAP cannot do
+ * for a React-owned subtree without keeping the node mounted by hand.
  */
 export default function SubjectPicker({ subjects, value, onChange, disabled }) {
   const [open, setOpen] = useState(false)
@@ -18,8 +24,13 @@ export default function SubjectPicker({ subjects, value, onChange, disabled }) {
     const onDocClick = (e) => {
       if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
     }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [])
 
   const filtered = useMemo(() => {
@@ -35,63 +46,90 @@ export default function SubjectPicker({ subjects, value, onChange, disabled }) {
   const current = subjects.find((s) => s.usubjid === value)
 
   return (
-    <div className="subject-picker" ref={rootRef}>
+    <div className="picker" ref={rootRef}>
       <button
         type="button"
-        className="subject-trigger"
+        className="picker-trigger"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         data-testid="subject-trigger"
       >
-        <span className="subject-id">{value}</span>
+        <span className="picker-id">{value}</span>
         {current && (
-          <span className="subject-meta">
+          <span className="picker-meta">
             {current.site} · {current.arm} · {current.age}{current.sex}
             {current.findings > 0 && (
-              <span className="subject-flag">{current.findings} finding{current.findings > 1 ? 's' : ''}</span>
+              <span className="tag tag-warn" style={{ padding: '2px 9px' }}>
+                {current.findings} finding{current.findings > 1 ? 's' : ''}
+              </span>
             )}
           </span>
         )}
-        <span className="subject-caret">▾</span>
+        <span className="picker-caret"><Icon name="chevron" size={14} /></span>
       </button>
 
-      {open && (
-        <div className="subject-menu" data-testid="subject-menu">
-          <input
-            autoFocus
-            className="subject-search"
-            placeholder="Filter by id, site, arm, country…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <div className="subject-count">
-            {filtered.length} of {subjects.length} subjects
-          </div>
-          <ul className="subject-list">
-            {filtered.map((s) => (
-              <li key={s.usubjid}>
-                <button
-                  type="button"
-                  className={`subject-option${s.usubjid === value ? ' selected' : ''}`}
-                  onClick={() => { onChange(s.usubjid); setOpen(false); setQuery('') }}
-                >
-                  <span className="subject-option-id">{s.usubjid}</span>
-                  <span className="subject-option-meta">
-                    {s.site} · {s.arm} · {s.age}{s.sex} · {s.country}
-                  </span>
-                  <span className="subject-option-tags">
-                    {s.findings > 0 && <em className="tag-finding">{s.findings}</em>}
-                    {s.pro_records > 0 && <em className="tag-pro">{s.pro_records} said</em>}
-                  </span>
-                </button>
-              </li>
-            ))}
-            {filtered.length === 0 && (
-              <li className="subject-empty">No subject matches “{query}”.</li>
-            )}
-          </ul>
-        </div>
-      )}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="picker-menu"
+            data-testid="subject-menu"
+            role="listbox"
+            initial={{ opacity: 0, y: -8, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div className="picker-search">
+              <Icon name="search" size={15} />
+              <input
+                autoFocus
+                className="input"
+                placeholder="Filter by id, site, arm, country…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+
+            <div className="picker-count">
+              {filtered.length} of {subjects.length} subjects
+            </div>
+
+            <ul className="picker-list u-scroll">
+              {filtered.map((s) => (
+                <li key={s.usubjid}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={s.usubjid === value}
+                    className={`picker-option${s.usubjid === value ? ' is-selected' : ''}`}
+                    onClick={() => { onChange(s.usubjid); setOpen(false); setQuery('') }}
+                  >
+                    <span className="picker-option-id">{s.usubjid}</span>
+                    <span className="picker-option-meta">
+                      {s.site} · {s.arm} · {s.age}{s.sex} · {s.country}
+                    </span>
+                    <span className="picker-option-tags">
+                      {s.findings > 0 && (
+                        <span className="tag tag-warn" style={{ padding: '2px 9px' }}>{s.findings}</span>
+                      )}
+                      {s.pro_records > 0 && (
+                        <span className="tag tag-quiet" style={{ padding: '2px 9px' }}>
+                          {s.pro_records} said
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {filtered.length === 0 && (
+                <li className="picker-empty">No subject matches “{query}”.</li>
+              )}
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

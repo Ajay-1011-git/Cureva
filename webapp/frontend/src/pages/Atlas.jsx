@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import gsap from 'gsap'
 import AvatarCanvas from '../avatar/AvatarCanvas.jsx'
 import FindingGraphPanel from '../components/FindingGraphPanel.jsx'
 import MicButton from '../components/MicButton.jsx'
 import SubjectPicker from '../components/SubjectPicker.jsx'
+import PageHero from '../components/PageHero.jsx'
+import Icon from '../components/Icon.jsx'
+import { useReveal, useMagnetic } from '../lib/motion.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -34,6 +36,10 @@ export default function Atlas() {
     import.meta.env.VITE_DEMO_SUBJECT || '042-S07-001')
   const audioRef = useRef(null)
   const [audioEl, setAudioEl] = useState(null)
+  const logRef = useRef(null)
+
+  const bodyRef = useReveal([])
+  const sendRef = useMagnetic({ strength: 4 })
 
   useEffect(() => {
     fetch(`${API_BASE}/api/atlas/subjects`)
@@ -48,6 +54,13 @@ export default function Atlas() {
     audioRef.current = el
     setAudioEl(el)
   }, [])
+
+  // Keep the newest turn in view. Without this the transcript silently grows
+  // downward and the reply you are waiting for lands off screen.
+  useEffect(() => {
+    const el = logRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [messages])
 
   const sendTurn = useCallback(async (payload) => {
     setBusy(true)
@@ -66,8 +79,9 @@ export default function Atlas() {
       // "(spoken)" placeholder. If the transcription misheard you, that has to
       // be visible or the conversation is impossible to debug live.
       const heard = payload.text
-        ?? (data.transcript ? `🎤 ${data.transcript}` : '🎤 (nothing heard)')
-      setMessages((m) => [...m, { role: 'patient', text: heard },
+        ?? (data.transcript || '(nothing heard)')
+      setMessages((m) => [...m,
+        { role: 'patient', text: heard, spoken: !payload.text },
         { role: 'avatar', text: data.reply_text, extracted: data.extracted,
           redFlags: data.red_flags || [] }])
       setGesture(data.gesture)
@@ -114,71 +128,126 @@ export default function Atlas() {
   }
 
   return (
-    <div className="atlas-page">
-      <h1>Atlas</h1>
-      {degraded && (
-        <div className="degraded-banner">
-          Voice service degraded — running in text-only / canned-reply mode. Replies are still being noted, just not spoken.
+    <div className="page">
+      <PageHero
+        eyebrow="Act 1 · Atlas"
+        eyebrowIcon="graph"
+        title="The whole study, and the voice inside it."
+        sub="Speak with an enrolled participant. What they say is written into the record and shows up in the finding graph beside it — in the same turn, with the quote still attached."
+      />
+
+      <div className="console">
+        <div className="console-card">
+          <span className="console-label">
+            <Icon name="user" size={14} />
+            Speaking with
+          </span>
+          <SubjectPicker subjects={subjects} value={usubjid}
+                         onChange={setUsubjid} disabled={busy} />
+          <span className="console-spacer" />
+          <span className="console-hint">
+            the enrolled participant this conversation adds records to
+          </span>
         </div>
-      )}
-      <div className="atlas-subject-row">
-        <label>Speaking with</label>
-        <SubjectPicker subjects={subjects} value={usubjid}
-                       onChange={setUsubjid} disabled={busy} />
-        <span className="atlas-subject-hint">
-          the enrolled participant this conversation adds records to
-        </span>
       </div>
-      <div className="atlas-split">
-        <section className="atlas-avatar-col">
-          <AvatarCanvas gesture={gesture} audioEl={audioEl} engaged={engaged} />
-          <div className="chat-log">
-            {messages.map((m, i) => (
-              <div key={i} className={`chat-msg chat-${m.role}`}>
-                <span className="chat-role">{m.role}</span> {m.text}
-                {m.redFlags?.length > 0 && (
-                  <div className="chat-flags">
-                    {m.redFlags.map((f, j) => (
-                      <span key={j} className="chat-flag" title={f.term}>
-                        ⚑ {f.reason}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {m.extracted?.length > 0 && (
-                  <div className="chat-extracted">
-                    {m.extracted.map((e, j) => (
-                      <span key={j} className={`chat-tag tag-${e.pro_type}`}>
-                        {e.pro_type === 'CONMED_MENTION' ? '℞' : '●'} {e.term}
-                      </span>
-                    ))}
-                  </div>
-                )}
+
+      <div className="page-body" ref={bodyRef}>
+        <div className="l-workspace">
+          {degraded && (
+            <div className="notice notice-warn" style={{ marginBottom: 22 }} data-reveal>
+              <Icon name="alert" size={16} />
+              <span>
+                <strong>Voice service degraded.</strong> Running text-only with canned
+                replies. Everything is still being noted — it is just not spoken aloud.
+              </span>
+            </div>
+          )}
+
+          <div className="atlas-grid">
+            <section className="atlas-col">
+              <div className="card avatar-card" data-reveal data-reveal-group="left">
+                <AvatarCanvas gesture={gesture} audioEl={audioEl} engaged={engaged} />
               </div>
-            ))}
+
+              <div className="card chat-card" data-reveal data-reveal-group="left">
+                <div className="chat-log u-scroll" ref={logRef}>
+                  {messages.length === 0 ? (
+                    <div className="chat-empty">
+                      <Icon name="mic" size={26} strokeWidth={1.4} />
+                      Ask how they have been feeling, or say a symptom out loud.
+                      Every term is written back with the sentence it came from.
+                    </div>
+                  ) : messages.map((m, i) => (
+                    <div key={i} className={`chat-msg is-${m.role}`}>
+                      <span className="chat-role">
+                        {m.role === 'patient' && m.spoken && <Icon name="mic" size={11} />}
+                        {m.role === 'patient' ? 'patient' : m.role === 'avatar' ? 'atlas' : 'system'}
+                      </span>
+                      <div className="chat-bubble">{m.text}</div>
+
+                      {m.redFlags?.length > 0 && (
+                        <div className="chat-chips">
+                          {m.redFlags.map((f, j) => (
+                            <span key={j} className="chip chip-flag" title={f.term}>
+                              <Icon name="flag" size={11} /> {f.reason}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {m.extracted?.length > 0 && (
+                        <div className="chat-chips">
+                          {m.extracted.map((e, j) => (
+                            <span key={j}
+                                  className={`chip ${e.pro_type === 'CONMED_MENTION' ? 'chip-conmed' : 'chip-symptom'}`}>
+                              <Icon name={e.pro_type === 'CONMED_MENTION' ? 'document' : 'pulse'} size={11} />
+                              {e.term}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {micNotice && (
+                  <div className="composer-notice">
+                    <Icon name="alert" size={13} /> {micNotice}
+                  </div>
+                )}
+
+                <div className="composer">
+                  <MicButton onClip={handleClip} disabled={busy}
+                             onUnavailable={setMicNotice} />
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="Speak, or type a symptom or medication…"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                    disabled={busy}
+                  />
+                  <button ref={sendRef}
+                          className="btn btn-primary composer-send"
+                          onClick={handleSend}
+                          disabled={busy || !text.trim()}
+                          aria-label="Send"
+                          data-testid="send-button">
+                    {busy
+                      ? <span className="ask-thinking"><i /><i /><i /></span>
+                      : <Icon name="send" size={16} />}
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <section className="atlas-col" data-reveal data-reveal-group="right">
+              <FindingGraphPanel apiBase={API_BASE} refreshKey={graphVersion}
+                                 subject={usubjid} onSelectSubject={setUsubjid} />
+            </section>
           </div>
-          {micNotice && <div className="mic-notice">{micNotice}</div>}
-          <div className="chat-input-row">
-            <MicButton onClip={handleClip} disabled={busy}
-                       onUnavailable={setMicNotice} />
-            <input
-              type="text"
-              placeholder="Speak, or type a symptom or medication…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              disabled={busy}
-            />
-            <button onClick={handleSend} disabled={busy || !text.trim()}
-                    data-testid="send-button">
-              {busy ? '…' : 'Send'}
-            </button>
-          </div>
-        </section>
-        <section className="atlas-graph-col">
-          <FindingGraphPanel apiBase={API_BASE} refreshKey={graphVersion}
-                             subject={usubjid} onSelectSubject={setUsubjid} />
-        </section>
+        </div>
       </div>
     </div>
   )

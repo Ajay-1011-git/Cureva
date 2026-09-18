@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Icon from './Icon.jsx'
 
 /**
  * Press-to-talk microphone (T1.32's "mic button + text fallback").
@@ -12,6 +13,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  *  - Microphone access needs a user gesture and can be denied outright. A
  *    refusal is reported to the parent so the page can say so plainly and
  *    fall back to typing, rather than leaving a dead button on screen.
+ *
+ * While recording, the label is replaced by a live waveform — the one place
+ * the design lets the accent colour move, and the clearest possible signal
+ * that the microphone is actually open.
  */
 const MAX_SECONDS = 25          // Sarvam's REST limit is 30s; stop short of it.
 
@@ -100,14 +105,23 @@ export default function MicButton({ onClip, disabled, onUnavailable }) {
   return (
     <button
       type="button"
-      className={`mic-button${recording ? ' recording' : ''}`}
+      className={`btn btn-ghost mic-btn${recording ? ' is-recording' : ''}`}
       onClick={recording ? stop : start}
       disabled={disabled}
       data-testid="mic-button"
       title={recording ? 'Stop and send' : 'Hold a conversation out loud'}
     >
-      <span className="mic-dot" />
-      {recording ? `Stop · ${MAX_SECONDS - elapsed}s` : 'Speak'}
+      {recording ? (
+        <>
+          <span className="wave"><i /><i /><i /><i /><i /></span>
+          <span className="t-num">{MAX_SECONDS - elapsed}s</span>
+        </>
+      ) : (
+        <>
+          <Icon name="mic" size={15} />
+          Speak
+        </>
+      )}
     </button>
   )
 }
