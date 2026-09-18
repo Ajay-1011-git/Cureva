@@ -119,7 +119,9 @@ check("the protocol section is cited", any(e.domain == "DOC" and e.section == "4
 print("\n=== VERIFY: a subject with no baseline is skipped, not guessed ===")
 import pathlib
 src = pathlib.Path("stage1/atlas.py").read_text()
-det = src[src.index("def detect_visit_out_of_window"):]
+start = src.index("def detect_visit_out_of_window")
+end = src.find("\n@detector(", start)
+det = src[start:end if end != -1 else len(src)]
 check("detector falls back to RFSTDTC then skips", "reference_start_date" in det and "do not guess" in det)
 check("no practice site or subject id in the detector", "042-" not in det and '"S0' not in det)
 

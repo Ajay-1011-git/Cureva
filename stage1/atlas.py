@@ -1897,3 +1897,44 @@ def detect_missing_exposure_record(graph: "StudyGraph", site: str | None, usubji
 
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
+
+
+@detector("LAB_UNIT_MISMATCH")
+def detect_lab_unit_mismatch(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                             cut: int | None) -> list[Finding]:
+    """A laboratory record whose unit matches no known reference range.
+
+    Distinct from the S07-style KNOWN local-laboratory variant, which
+    standardise_lab converts without complaint via reference_ranges.csv's LAB
+    column. This detector fires only on a genuine data-quality gap: a unit that
+    is neither the central unit nor any documented conversion source for that
+    test — something standardise_lab could not resolve at all, and every other
+    detector that calls it silently skips.
+
+    Runs every real LB record through standardise_lab; a NoReferenceRange (the
+    test itself is not in reference_ranges.csv) is a different problem from a
+    bad unit on a known test and is not reported here.
+    """
+    findings: list[Finding] = []
+    for r in graph.records("LB", cut=cut, site=site, usubjid=usubjid):
+        testcd = (r.get("LBTESTCD") or "").strip().upper()
+        unit = r.get("LBORRESU")
+        raw = graph.record_value(r, "LBORRES", cut)
+        try:
+            standardise_lab(testcd, raw, unit, graph.ranges)
+        except UnitMismatch as exc:
+            subject = r.get("USUBJID")
+            findings.append(Finding(
+                code="LAB_UNIT_MISMATCH", usubjid=subject, site=graph.site_for(subject),
+                severity="MEDIUM",
+                rationale=(f"{testcd} record carries unit {unit!r}, which matches "
+                           f"neither the central laboratory's unit nor any known "
+                           f"conversion for this test: {exc}"),
+                evidence=[Atlas.ref(r)],
+                # The unit itself is either recognised or it is not — no
+                # judgement call involved once standardise_lab has raised.
+                confidence=0.9, protocol_version=graph.protocol_version_at(cut)))
+        except NoReferenceRange:
+            continue                     # a different problem; not reported here
+    findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
+    return findings

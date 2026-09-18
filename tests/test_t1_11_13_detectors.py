@@ -124,7 +124,9 @@ check("both subjects of the pair are cited as evidence",
       sorted(e.usubjid for e in f.evidence) == sorted(q["_answer"]))
 import pathlib
 src = pathlib.Path("stage1/atlas.py").read_text()
-det = src[src.index("def detect_duplicate_subject"):]
+start = src.index("def detect_duplicate_subject")
+end = src.find("\n@detector(", start)
+det = src[start:end if end != -1 else len(src)]
 check("no practice subject id appears in the detector logic",
       "042-S02-013" not in det and "042-S05-021" not in det)
 
