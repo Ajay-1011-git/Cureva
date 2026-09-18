@@ -39,18 +39,26 @@ const DEG = THREE.MathUtils.degToRad
  * explaining_gesture about why the axes are not the obvious ones on this rig.
  */
 export const RELAXED_BASE = {
-  // Bring the arms down to the sides. Positive X lowers on this rig.
-  rightUpperArm: { x: DEG(74), y: 0, z: DEG(-6) },
-  leftUpperArm: { x: DEG(74), y: 0, z: DEG(6) },
-  // A straight arm reads as stiff; real arms rest with a slight bend.
-  rightLowerArm: { x: DEG(6), y: DEG(-12), z: 0 },
-  leftLowerArm: { x: DEG(6), y: DEG(12), z: 0 },
-  // Hands turned very slightly inward, as they hang.
-  rightHand: { x: 0, y: DEG(-8), z: 0 },
-  leftHand: { x: 0, y: DEG(8), z: 0 },
+  // Found by rendering candidate stances and looking at them, not derived.
+  // Two things about this rig that guessing gets wrong:
+  //   - Z is the TWIST axis for the arm bones. Rotating Z alone leaves the arm
+  //     sticking straight out and just rolls the hand over.
+  //   - X is the SWING axis, but a large X rotation on its own collapses the
+  //     sleeve into the shoulder (the skin weights don't carry it) — at 74°
+  //     the jacket crumpled into a cap sleeve and the hands read as detached.
+  // X ~40° combined with Z ~-35° is what actually produces a natural drape:
+  // the swing brings the arm down, the twist brings it in against the body.
+  rightUpperArm: { x: DEG(40), y: 0, z: DEG(-35) },
+  leftUpperArm: { x: DEG(40), y: 0, z: DEG(35) },
+  // A straight arm reads as stiff; a small bend at the elbow settles it.
+  rightLowerArm: { x: DEG(10), y: 0, z: DEG(-8) },
+  leftLowerArm: { x: DEG(10), y: 0, z: DEG(8) },
+  // Hands left at rest — any twist here splays the fingers outward on this rig.
+  rightHand: { x: 0, y: 0, z: 0 },
+  leftHand: { x: 0, y: 0, z: 0 },
   // Shoulders settle rather than sitting squared-up.
-  rightShoulder: { x: DEG(3), y: 0, z: 0 },
-  leftShoulder: { x: DEG(3), y: 0, z: 0 },
+  rightShoulder: { x: DEG(2), y: 0, z: 0 },
+  leftShoulder: { x: DEG(2), y: 0, z: 0 },
 }
 
 /** bone -> {x,y,z} target Euler offset from RELAXED_BASE, in radians. */

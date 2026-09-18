@@ -80,11 +80,27 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
         applySpeakingMotion(avatar.bones, stateRef.current.speech, t)
         setSpeaking(stateRef.current.speech > 0.04)
 
+        stateRef.current.frames = (stateRef.current.frames ?? 0) + 1
         renderer.render(scene, camera)
         animId = requestAnimationFrame(tick)
       }
       tick()
       setStatus('ready')
+
+      // Dev-only handle so the animation can be inspected from a test or the
+      // console — proving the loop is actually driving bones, not just that
+      // the canvas exists. Never referenced by application code.
+      if (import.meta.env.DEV) {
+        window.__cureva_avatar = {
+          bones: avatar.bones,
+          sample: () => {
+            const h = avatar.bones.get('head')
+            const c = avatar.bones.get('chest')
+            return { headX: h?.quaternion.x ?? 0, headY: h?.quaternion.y ?? 0,
+                     chestY: c?.position.y ?? 0, frames: stateRef.current.frames ?? 0 }
+          },
+        }
+      }
     }
 
     init()

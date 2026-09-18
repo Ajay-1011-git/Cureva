@@ -35,44 +35,76 @@ function addRotation(bone, x, y, z) {
 }
 
 /**
+ * Offset a bone from its rest POSITION, in bone-local units.
+ *
+ * Rotation alone turned out not to be enough to make breathing read: a couple
+ * of degrees at the chest is a sub-pixel change at the shoulders from a
+ * camera framed on the upper body. Actually lifting the chest and hips a
+ * little is what the eye picks up as breathing. Rest positions are captured
+ * once so this composes rather than drifting frame over frame.
+ */
+const restPositions = new WeakMap()
+function addOffset(bone, fx, fy, fz) {
+  if (!bone) return
+  let rest = restPositions.get(bone)
+  if (!rest) {
+    rest = { v: bone.position.clone(), len: bone.position.length() || 1 }
+    restPositions.set(bone, rest)
+  }
+  // Offsets are FRACTIONS of the bone's own rest length, not absolute units.
+  // Absolute numbers are meaningless across rigs and dangerous on this one:
+  // the chest bone's local offset is 0.86, so an absolute 0.9 doubled the
+  // torso and threw the whole figure out of frame. A fraction is safe
+  // wherever the model came from and whatever scale it was exported at.
+  const L = rest.len
+  bone.position.set(rest.v.x + fx * L, rest.v.y + fy * L, rest.v.z + fz * L)
+}
+
+/**
  * Breathing + weight shift. Always runs.
  * @param {Map} bones humanoid-role -> THREE.Bone
  * @param {number} t   elapsed seconds
  */
 export function applyIdleLife(bones, t) {
-  // Breath: ~4.2s cycle, a resting adult rate. Chest expands, shoulders lift
-  // a beat behind it, head rides along. Amplitudes here were raised after
-  // looking at it on screen — at ~1° the motion was mathematically present
-  // and visually absent, which is the same as not having built it.
-  const breath = Math.sin(t * (2 * Math.PI / 4.2))
-  const breathLag = Math.sin(t * (2 * Math.PI / 4.2) - 0.5)
-  addRotation(bones.get('chest'), breath * DEG(2.6), 0, 0)
-  addRotation(bones.get('upperChest'), breath * DEG(2.0), 0, 0)
-  addRotation(bones.get('leftShoulder'), breathLag * DEG(2.6), 0, DEG(-1) * breathLag)
-  addRotation(bones.get('rightShoulder'), breathLag * DEG(2.6), 0, DEG(1) * breathLag)
-  addRotation(bones.get('neck'), breath * DEG(-1.2), 0, 0)
+  // Breath: ~4.2s cycle, a resting adult rate. Rotation AND a small vertical
+  // lift — rotation alone is a sub-pixel change at this camera distance, which
+  // is why the first version was mathematically present and invisible.
+  const phase = t * (2 * Math.PI / 4.2)
+  const breath = Math.sin(phase)
+  const breathLag = Math.sin(phase - 0.5)
 
-  // Weight shift: much slower, on hips and spine so the whole figure moves as
+  // ~1.5% of the chest bone's length: real quiet breathing is under 1% of
+  // body height, and this is on top of the rotation below.
+  addOffset(bones.get('chest'), 0, breath * 0.015, 0)
+  addOffset(bones.get('hips'), 0, breath * 0.004, 0)
+  addRotation(bones.get('chest'), breath * DEG(3.4), 0, 0)
+  addRotation(bones.get('upperChest'), breath * DEG(2.6), 0, 0)
+  addRotation(bones.get('leftShoulder'), breathLag * DEG(4.0), 0, breathLag * DEG(-2.5))
+  addRotation(bones.get('rightShoulder'), breathLag * DEG(4.0), 0, breathLag * DEG(2.5))
+  addRotation(bones.get('neck'), breath * DEG(-1.8), 0, 0)
+
+  // Weight shift: much slower, on hips and spine, so the whole figure moves as
   // one rather than the head drifting on a static body.
   const sway = Math.sin(t * (2 * Math.PI / 11))
   const sway2 = Math.sin(t * (2 * Math.PI / 7) + 1.1)
-  addRotation(bones.get('hips'), 0, sway * DEG(3.0), sway2 * DEG(1.8))
-  addRotation(bones.get('spine'), 0, sway * DEG(-1.4), sway2 * DEG(-1.0))
+  addOffset(bones.get('hips'), sway * 0.006, 0, 0)
+  addRotation(bones.get('hips'), 0, sway * DEG(4.5), sway2 * DEG(2.6))
+  addRotation(bones.get('spine'), 0, sway * DEG(-2.2), sway2 * DEG(-1.6))
 
   // Head: never perfectly still above the neck.
   addRotation(bones.get('head'),
-    Math.sin(t * (2 * Math.PI / 6.3) + 0.4) * DEG(2.4),
-    Math.sin(t * (2 * Math.PI / 9.1)) * DEG(4.0),
-    Math.sin(t * (2 * Math.PI / 13)) * DEG(1.6))
+    Math.sin(t * (2 * Math.PI / 6.3) + 0.4) * DEG(3.6),
+    Math.sin(t * (2 * Math.PI / 9.1)) * DEG(6.5),
+    Math.sin(t * (2 * Math.PI / 13)) * DEG(2.4))
 
-  // Arms swing gently from the shoulder and settle at the elbow, on periods
-  // that don't match the breath — so nothing ever looks like it is on a loop.
+  // Arms swing gently, on periods that don't match the breath so nothing ever
+  // looks like it is on a loop.
   const armDrift = Math.sin(t * (2 * Math.PI / 8.5))
   const armDrift2 = Math.sin(t * (2 * Math.PI / 6.7) + 2.2)
-  addRotation(bones.get('leftUpperArm'), armDrift * DEG(2.2), 0, armDrift2 * DEG(1.4))
-  addRotation(bones.get('rightUpperArm'), -armDrift * DEG(2.2), 0, -armDrift2 * DEG(1.4))
-  addRotation(bones.get('leftLowerArm'), armDrift2 * DEG(2.0), 0, 0)
-  addRotation(bones.get('rightLowerArm'), -armDrift2 * DEG(2.0), 0, 0)
+  addRotation(bones.get('leftUpperArm'), armDrift * DEG(3.4), 0, armDrift2 * DEG(2.4))
+  addRotation(bones.get('rightUpperArm'), -armDrift * DEG(3.4), 0, -armDrift2 * DEG(2.4))
+  addRotation(bones.get('leftLowerArm'), armDrift2 * DEG(3.2), 0, 0)
+  addRotation(bones.get('rightLowerArm'), -armDrift2 * DEG(3.2), 0, 0)
 }
 
 /**
