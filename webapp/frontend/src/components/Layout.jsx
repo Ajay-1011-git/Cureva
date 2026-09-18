@@ -26,11 +26,14 @@ export default function Layout() {
       <div className="app-shell">
         <nav className="nav-bar">
           <div className="nav-brand">Cureva <span className="nav-brand-sub">Study Sentinel</span></div>
-          {/* Atlas is the whole navigable product. Nothing unfinished is
-              advertised here; unknown paths redirect to /atlas (App.jsx). */}
+          {/* Only shipped surfaces appear here; unknown paths redirect to
+              /atlas (App.jsx). */}
           <div className="nav-links">
             <NavLink to="/atlas" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               Atlas
+            </NavLink>
+            <NavLink to="/monitor" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              Review
             </NavLink>
           </div>
         </nav>
