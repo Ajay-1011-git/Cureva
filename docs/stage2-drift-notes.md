@@ -220,3 +220,127 @@ Verified on the practice study, real output in the commit messages and above:
 Not yet built, and not claimed: Act 3 (the Tribunal, T2.12–T2.17),
 `Atlas.verify_evidence()`, the `/monitor` page and its routes (T2.18–T2.21),
 and the submission artifacts (T2.22).
+
+---
+
+# Act 3 (T2.12–T2.17)
+
+## 7. Where the APIs had moved since the earlier build
+
+### 7.1 `reasoning_format` is no longer required
+
+The inherited ground truth is emphatic: JSON-mode calls to this model family
+return **empty content** unless `reasoning_format` is set alongside
+`reasoning_effort`, discovered live during the previous build and carried
+forward as a rule every new call must follow.
+
+Re-verified before writing a single call, as the build instructions require.
+It no longer reproduces:
+
+```
+A: JSON mode, reasoning_format OMITTED  -> '{"verdict":"ESCALATE","why":"The patient presents with...'
+   EMPTY? False
+B: JSON mode, reasoning_format=hidden   -> '{"verdict":"MONITOR","why":"The patient has mild...'
+```
+
+Both fields are still set on every call — `hidden` keeps chain-of-thought out
+of a transcript a human reads, which is worth having for its own sake. But the
+code no longer *depends* on a requirement that has since lapsed, and the reason
+for setting it is now the real one.
+
+`openai/gpt-oss-120b` was confirmed present in Groq's live model list at the
+same time. It is still current.
+
+### 7.2 The binding rate limit is tokens, not requests
+
+The PRD and TRD both plan around Groq's free-tier **30 requests/minute**
+ceiling, and size the Tribunal's budget against it.
+
+The limit that actually binds is **tokens per minute**, and it binds an order
+of magnitude sooner:
+
+```
+RateLimitError: 429 — Rate limit reached for model `openai/gpt-oss-120b` ...
+on tokens per minute (TPM): Limit 8000, Used 7535, Requested 1094
+```
+
+One full deliberation (3 Round-1 calls + 3 Round-2 calls) costs ~5.7k tokens
+after dropping `reasoning_effort` to `low` — ~7.4k before. Against an 8000 TPM
+ceiling that is **roughly one deliberation per minute**, not the six-calls-per-
+finding-across-several-findings the risk table assumed. A budget of 3 spends
+two of its three attempts collecting 429s.
+
+Two consequences: `tribunal_budget` defaults to **1**, and a 429 is never
+retried — retrying spends the exact window the retry is waiting on.
+
+## 8. Where the architecture could not survive the real data volume
+
+TNFR-1 asks that `run_cycle()` stay inside its time budget *"even when every
+escalation-worthy finding attempts a full Tribunal round"*.
+
+At this study's real volume that is not reachable. Cut 9 produces **170**
+escalation-worthy findings; a full round each is ~1020 network calls and, at the
+measured TPM ceiling, several hours. Implementing TNFR-1 literally ships a
+graded run that times out.
+
+Act 3 is therefore **off by default**, with a per-cycle budget when on. The
+graded path stays deterministic and offline exactly as the detector layer's
+was; the demo switches Act 3 on deliberately. This is the TRD's own isolation
+principle applied honestly to the volume the data has, and it makes G7 true by
+construction rather than by hope — verified, not asserted:
+
+| | findings | escalation-worthy | tokens | duration |
+|---|---|---|---|---|
+| Act 3 off | 251 | 170 | 0 | ~330ms |
+| Act 3 on, working key | 251 | 170 | 7703 | 16.3s |
+| Act 3 on, revoked key | 251 | 170 | 0 | 1.0s |
+
+The escalation-worthy set is byte-identical across all three.
+
+## 9. Model gaps in the specified Tribunal shapes
+
+* **`CrossExamChallenge` carries no `RecordRef`s.** So a Round-2 challenge
+  cannot be evidence-checked the way a Round-1 verdict can — there is nothing
+  to look up. Round 3 checks challenges *structurally* (does the target persona
+  exist and did it actually make a claim) and reports that as a structural
+  check. Presenting it as a fact-check would be the exact overstatement Round 3
+  exists to prevent.
+* **`TribunalTranscript.round3` is `Arbitration | None`, not `Arbitration`.** A
+  transcript that was skipped has no arbitration to carry, and a required field
+  would force a fabricated one — an empty `Arbitration` with a `final_verdict`
+  nobody reached is worse than an explicit absence beside `ran=False`.
+* **`tokens_used` and `duration_ms` added to the transcript.** `EXECUTE` has to
+  report honest token counts, and the per-finding cost is what made the TPM
+  ceiling in §7.2 visible at all.
+
+## 10. Why the rule-based verdict stays authoritative — observed, not assumed
+
+The same borderline prompt, run twice against the same model minutes apart,
+returned `ESCALATE` once and `MONITOR` once. Genuine nondeterminism on exactly
+the kind of judgment the Tribunal is for.
+
+This is the concrete case for the design the TRD already mandates: Act 3
+contributes narrative and alternatives, and `verdict.escalate` is computed by
+rule before Act 3 is attempted and never modified by it. A Tribunal that could
+overturn the rule would make the cycle's correctness a function of which way a
+model leaned that minute.
+
+## 11. What is verified for Act 3
+
+- `verify_evidence()` is additive: 81 insertions, **zero deletions**, exactly
+  one new `def`, no existing signature touched. `schemas.py` and `study.py`
+  remain untouched.
+- Round 1 isolation: three real personas, real field values quoted, real record
+  refs cited, and no persona references another (checked mechanically).
+- Round 3 discards **exactly** the deliberately-mismatched claim and keeps both
+  well-cited ones — and losing that vote flips the verdict to ESCALATE, so the
+  check demonstrably changes an outcome rather than just logging one.
+- Round 3 contains no model call at all (asserted against its own source, not
+  just its docstring).
+- All four real failure modes — 429, timeout, schema failure, and an exception
+  thrown straight out of the module — leave all 251 findings with a verdict and
+  nothing escaping into `run_cycle()`.
+- Stage 1 still scores 100.0/100 with 25/25 offline tests passing.
+
+Still not built, and not claimed: the review page and its routes (T2.18–T2.21)
+and the submission artifacts (T2.22).
