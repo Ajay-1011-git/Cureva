@@ -32,3 +32,4 @@ requests
 # either, "pandas only if it earns its keep"). Kept here so the documented
 # stack installs cleanly; drop it if it is still unused at Stage 3.
 pandas
+httpx
