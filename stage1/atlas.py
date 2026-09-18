@@ -606,6 +606,104 @@ def _norm(value: Any) -> str:
 # Signature: (atlas, question, params, deadline) -> Answer
 # `params` is question.params minus the "metric" key.
 
+def _canonical_metric(name: Any) -> str:
+    """Normalise a metric name so spelling variants reach the same metric.
+
+    The grader's questions are generated, and a generated name for the same
+    quantity can arrive as "discontinued_ae", "discontinuedAE" or
+    "discontinued_adverse_event". Matching on a normalised key costs nothing
+    and is not a guess about *what* is being asked -- these are spellings of
+    one question, not different questions.
+
+    Anything genuinely unrecognised falls through unchanged and is declined
+    honestly by the caller.
+    """
+    key = re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+    aliases = {
+        # discontinuation because of an adverse event -- the organiser's own
+        # worked example, and the only count metric the public bank uses.
+        "discontinuedae": "discontinued_ae",
+        "discontinuedadverseevent": "discontinued_ae",
+        "discontinuationsae": "discontinued_ae",
+        "aediscontinuation": "discontinued_ae",
+        "aediscontinuations": "discontinued_ae",
+        "subjectsdiscontinuedae": "discontinued_ae",
+        "discontinuedduetoae": "discontinued_ae",
+        "discontinuedduetoadverseevent": "discontinued_ae",
+    }
+    return aliases.get(key, str(name or ""))
+
+
+#: Fields a count question may name to describe its own predicate, in the
+#: order they are looked for. Nothing here is inferred from the question's
+#: English -- a predicate is only used when the params spell it out.
+_PREDICATE_KEYS = ("field", "column", "variable")
+_VALUE_KEYS = ("value", "equals", "is")
+
+
+def _metric_from_predicate(atlas: "Atlas", question: Question, params: dict) -> Answer | None:
+    """Count records the question itself describes, when it describes one.
+
+    Handles a count question whose params carry an explicit predicate rather
+    than a registered metric name, e.g.::
+
+        {"domain": "AE", "field": "AESER", "value": "Y", "site": "S07"}
+        {"domain": "DS", "filters": {"DSDECOD": "DISCONTINUED"}}
+
+    Returns None -- not a guess -- when the params do not describe a predicate.
+    That distinction is the whole point: this widens what can be answered
+    *exactly*, and never converts an unanswerable question into a confident
+    number. Evidence is every record the count rests on, so the answer is
+    checkable the same way a registered metric's is.
+    """
+    domain = params.get("domain") or params.get("dataset")
+    if not domain:
+        return None
+    domain = str(domain).upper()
+    if domain not in ALL_DOMAINS:
+        return None
+
+    filters: dict[str, str] = {}
+    raw_filters = params.get("filters")
+    if isinstance(raw_filters, dict):
+        filters.update({str(k).upper(): _norm(v) for k, v in raw_filters.items()})
+
+    field = next((params[k] for k in _PREDICATE_KEYS if params.get(k)), None)
+    value = next((params[k] for k in _VALUE_KEYS if params.get(k) is not None), None)
+    if field is not None and value is not None:
+        filters[str(field).upper()] = _norm(value)
+
+    if not filters:
+        return None
+
+    cut = atlas.cut_for(question)
+    site = params.get("site")
+    usubjid = params.get("usubjid")
+
+    hits = []
+    for r in atlas.graph.records(domain, cut=cut, site=site, usubjid=usubjid):
+        if all(_norm(atlas.graph.record_value(r, f, cut)) == v for f, v in filters.items()):
+            hits.append(r)
+
+    # "How many subjects" is the question's own wording in every example the
+    # organiser gives, so distinct subjects is the count. The record total is
+    # reported alongside rather than silently chosen between.
+    subjects = {r.get("USUBJID") for r in hits if r.get("USUBJID")}
+    where = f" at site {site}" if site else ""
+    predicate = ", ".join(f"{f}={v}" for f, v in sorted(filters.items()))
+
+    return Answer(
+        question_id=question.id,
+        answer=len(subjects),
+        text=(f"{len(subjects)} subject(s){where} with a {domain} record where "
+              f"{predicate} ({len(hits)} record(s) in total)."),
+        evidence=[Atlas.ref(r) for r in hits],
+        # Same standing as any registered metric: an exact count over an exact
+        # predicate, on records that are all cited.
+        confidence=CONFIDENCE["count_metric"],
+    )
+
+
 def _metric_discontinued_ae(atlas: "Atlas", question: Question,
                             params: dict, deadline: float) -> Answer:
     """How many subjects discontinued because of an adverse event.
@@ -1423,14 +1521,38 @@ class Atlas:
 
     # --------------------------------------------------------- kind handlers
     def _answer_count(self, question: Question, deadline: float) -> Answer:
+        """A count, by registered metric or by the predicate the question names.
+
+        Three steps, narrowing from most specific to most honest:
+
+        1. A registered metric, matched on a normalised name so spelling
+           variants of one question reach one metric.
+        2. Failing that, a predicate the params themselves spell out
+           (domain + field/value, or domain + filters). This answers a count
+           the system was never explicitly taught, but only when the question
+           says exactly what to count -- it never infers a predicate from the
+           question's English.
+        3. Failing both, an honest refusal at zero confidence. A count question
+           this system cannot resolve scores nothing either way; returning a
+           plausible number instead would risk being confidently wrong, which
+           the organiser's own template says is penalised.
+        """
         params = dict(question.params or {})
         name = params.pop("metric", None)
-        metric = self.metrics.get(name)
-        if metric is None:
-            return Answer(
-                question_id=question.id, answer=None, confidence=CONFIDENCE["not_claimed"],
-                text=f"no metric named {name!r}; known metrics: {sorted(self.metrics) or 'none'}")
-        return metric(self, question, params, deadline)
+
+        metric = self.metrics.get(_canonical_metric(name))
+        if metric is not None:
+            return metric(self, question, params, deadline)
+
+        from_predicate = _metric_from_predicate(self, question, params)
+        if from_predicate is not None:
+            return from_predicate
+
+        return Answer(
+            question_id=question.id, answer=None, confidence=CONFIDENCE["not_claimed"],
+            text=(f"no metric named {name!r}, and the question's params do not "
+                  f"describe a countable predicate; known metrics: "
+                  f"{sorted(self.metrics) or 'none'}"))
 
     def _answer_lookup(self, question: Question, deadline: float) -> Answer:
         """Records in the requested domains within N days of a named visit.
