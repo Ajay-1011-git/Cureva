@@ -1828,3 +1828,72 @@ def detect_dosing_error(graph: "StudyGraph", site: str | None, usubjid: str | No
 
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
+
+
+@detector("MISSING_EXPOSURE_RECORD")
+def detect_missing_exposure_record(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                                   cut: int | None) -> list[Finding]:
+    """A subject with visit-domain records but no corresponding EX dosing record.
+
+    Two shapes, both real gaps in the exposure record:
+
+    1. PRIMARY, unambiguous case: a subject enrolled (has a DM row) with zero
+       EX records at all — dosing was apparently never recorded despite
+       enrolment. Confirmed present in the practice data: exactly one subject,
+       042-S05-021 (who also carries zero LB/VS/AE records — see T1.13's
+       duplicate-subject finding for the same subject).
+
+    2. A post-baseline LB or VS record at a named visit with no EX record on or
+       before that visit's date for the same subject — a visit where dosing
+       should have already happened, evidenced. On the practice study this case
+       has zero real instances (every subject who has any EX record has one at
+       or before every later LB/VS visit), confirmed by an exhaustive scan
+       rather than assumed; the detector still checks for it because a hidden
+       study need not share that property.
+    """
+    findings: list[Finding] = []
+    subjects = ([usubjid] if usubjid else
+                [r["USUBJID"] for r in graph.records("DM", cut=cut, site=site)])
+
+    for subject in subjects:
+        ex_rows = graph.records("EX", cut=cut, usubjid=subject)
+        if not ex_rows:
+            dm_row = graph.records("DM", cut=cut, usubjid=subject)
+            other_domains = [d for d in ("LB", "VS", "AE", "CM", "DS", "MH", "EG")
+                             if graph.records(d, cut=cut, usubjid=subject)]
+            findings.append(Finding(
+                code="MISSING_EXPOSURE_RECORD", usubjid=subject, site=graph.site_for(subject),
+                severity="HIGH",
+                rationale=(f"Subject is enrolled but has zero EX (dosing) records at cut "
+                           f"{cut}." + (f" Other domains present: {', '.join(other_domains)}."
+                                       if other_domains else " No other domain has records "
+                                       "for this subject either.")),
+                evidence=[RecordRef(domain="DM", usubjid=subject)],
+                # An absence over the whole EX domain for an enrolled subject —
+                # nothing borderline about zero records.
+                confidence=0.9, protocol_version=graph.protocol_version_at(cut)))
+            continue
+
+        ex_dates = sorted(d for d in (graph.record_date(r, cut) for r in ex_rows) if d)
+        seen_visits: set[str] = set()
+        for domain in ("LB", "VS"):
+            for r in graph.records(domain, cut=cut, usubjid=subject):
+                visit = (r.get("VISIT") or "").strip()
+                if not visit or visit.upper() == "SCREENING" or visit in seen_visits:
+                    continue
+                d = graph.record_date(r, cut)
+                if d is None:
+                    continue
+                if ex_dates and any(e <= d for e in ex_dates):
+                    continue
+                seen_visits.add(visit)
+                findings.append(Finding(
+                    code="MISSING_EXPOSURE_RECORD", usubjid=subject, site=graph.site_for(subject),
+                    severity="MEDIUM",
+                    rationale=(f"{domain} record at visit {visit} ({d}) has no EX (dosing) "
+                               f"record on or before that date for this subject."),
+                    evidence=[Atlas.ref(r)],
+                    confidence=0.8, protocol_version=graph.protocol_version_at(cut)))
+
+    findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
+    return findings
