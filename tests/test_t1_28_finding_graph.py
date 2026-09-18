@@ -116,5 +116,65 @@ before = len(fg.nodes)
 fg.observe_all(excl_ans.findings, cut=None)     # same findings again
 check("observing the same findings twice does not duplicate nodes", len(fg.nodes) == before)
 
+
+print("\n=== patient-reported data maps ONTO the subject, not into new nodes ===")
+# An earlier version made a new node per utterance, which grew a constellation
+# of disconnected dots beside the subject and said nothing. What a person
+# reports is more of the same subject's story, so it folds into one node.
+fg3 = FindingGraph(g)
+hys3 = atlas.answer(Question(id="h", kind="finding", text="",
+                             params={"code": "HYS_LAW_CANDIDATE"}))
+fg3.observe_all(hys3.findings, cut=None)
+seeded = len(fg3.nodes)
+SUBJ = "042-S07-001"
+utterances = [
+    {"usubjid": SUBJ, "seq": 1, "term": "headache",
+     "raw_quote": "my head hurts", "pro_type": "SYMPTOM"},
+    {"usubjid": SUBJ, "seq": 2, "term": "ibuprofen",
+     "raw_quote": "taking ibuprofen", "pro_type": "CONMED_MENTION"},
+    {"usubjid": SUBJ, "seq": 3, "term": "jaundice",
+     "raw_quote": "my eyes look yellow", "pro_type": "SYMPTOM"},
+]
+for u in utterances:
+    fg3.observe_pro_record(u, cut=None)
+
+pro_nodes = [n for n in fg3.nodes.values() if n.code == "PATIENT_REPORTED"]
+print(f"  {len(utterances)} utterances -> {len(pro_nodes)} patient-reported node(s)")
+check("three utterances produce ONE node, not three", len(pro_nodes) == 1)
+check("total node count grew by exactly one", len(fg3.nodes) == seeded + 1)
+
+node = pro_nodes[0]
+check("the node belongs to the subject spoken to", node.usubjid == SUBJ)
+check("it cites every PRO record", len(node.evidence) == 3)
+check("it is marked as derived from PRO", node.derived_from == ["PRO"])
+
+snap3 = fg3.snapshot()
+rendered = next(n for n in snap3["nodes"] if n["code"] == "PATIENT_REPORTED")
+terms = [r["term"] for r in rendered["reported"]]
+quotes = [r["quote"] for r in rendered["reported"]]
+print(f"  accumulated terms: {terms}")
+check("every reported term is carried on the one node",
+      terms == ["headache", "ibuprofen", "jaundice"])
+check("each keeps its verbatim quote — a PRO record without one is "
+      "indistinguishable from a fabricated one",
+      quotes == ["my head hurts", "taking ibuprofen", "my eyes look yellow"])
+
+linked = [e for e in fg3.edges
+          if node.finding_id in (e.from_finding_id, e.to_finding_id)]
+targets = {e.to_finding_id for e in linked} | {e.from_finding_id for e in linked}
+check("it links to that subject's existing Hy's law finding",
+      f"HYS_LAW_CANDIDATE|{SUBJ}" in targets, str(sorted(targets)))
+check("it does not link to other subjects' findings",
+      all(fg3.nodes[t].usubjid == SUBJ for t in targets if t in fg3.nodes))
+
+print("\n=== a second subject speaking gets their own node ===")
+fg3.observe_pro_record({"usubjid": "042-S05-003", "seq": 1, "term": "nausea",
+                        "raw_quote": "feeling sick", "pro_type": "SYMPTOM"}, cut=None)
+pro_nodes = [n for n in fg3.nodes.values() if n.code == "PATIENT_REPORTED"]
+check("two subjects -> two patient-reported nodes", len(pro_nodes) == 2)
+check("each node holds only its own subject's words",
+      all(len(fg3.reported_terms[n.finding_id]) == (3 if n.usubjid == SUBJ else 1)
+          for n in pro_nodes))
+
 print("\n" + ("ALL T1.28 CHECKS PASSED" if not fails else f"FAILURES: {fails}"))
 sys.exit(1 if fails else 0)

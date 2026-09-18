@@ -58,6 +58,8 @@ class FindingGraph:
         self.nodes: dict[str, FindingNode] = {}      # finding_id -> node
         self._fingerprints: set[str] = set()           # (code, usubjid) seen
         self.edges: list[FindingEdge] = []
+        #: finding_id -> what the patient has reported, in order.
+        self.reported_terms: dict[str, list[dict]] = {}
         self._graph = nx.Graph()
 
     # ------------------------------------------------------------- ingest
@@ -95,44 +97,55 @@ class FindingGraph:
     PATIENT_REPORTED = "PATIENT_REPORTED"
 
     def observe_pro_record(self, record, cut: int | None) -> FindingNode | None:
-        """Add one patient-reported record to the graph.
+        """Fold one patient-reported record into that subject's own node.
 
-        This is what makes a conversation visible: the study's existing
-        findings are seeded at startup, so a turn about an already-known
-        subject would otherwise change nothing on screen. What genuinely IS
-        new is what the patient just said, so that is what gets a node —
-        carrying the verbatim quote, and linked to that subject's existing
-        findings so it lands beside them rather than floating alone.
+        ONE node per subject, not one per utterance. An earlier version made a
+        new node for every sentence, which grew a little constellation of
+        disconnected dots beside the subject and said nothing — what a person
+        reports is more of the same subject's story, not a series of unrelated
+        objects. So this finds the subject's existing PATIENT_REPORTED node and
+        adds to it, creating one only the first time they say something.
+
+        The node carries every term reported so far and the verbatim quote
+        behind each, and is linked to that subject's existing findings — which
+        is the point: what the patient says lands next to what the data already
+        showed about them.
         """
         usubjid = record.get("usubjid") or record.get("USUBJID")
-        seq = record.get("seq")
         if not usubjid:
             return None
-        key = f"{self.PATIENT_REPORTED}|{usubjid}|{seq}"
-        if key in self._fingerprints:
-            return None
-        self._fingerprints.add(key)
+        key = f"{self.PATIENT_REPORTED}|{usubjid}"
+        term = (record.get("term") or "").strip()
+        quote = (record.get("raw_quote") or "").strip()
+        seq = record.get("seq")
 
-        node = FindingNode(
-            finding_id=key,
-            code=self.PATIENT_REPORTED,
-            usubjid=usubjid,
-            site=self.study_graph.site_for(usubjid),
-            evidence=[RecordRef(domain="PRO", usubjid=usubjid, seq=seq)],
-            derived_from=["PRO"],
-            cut_available=cut or 1,
-        )
-        self.nodes[key] = node
-        self._graph.add_node(key)
+        node = self.nodes.get(key)
+        if node is None:
+            node = FindingNode(
+                finding_id=key,
+                code=self.PATIENT_REPORTED,
+                usubjid=usubjid,
+                site=self.study_graph.site_for(usubjid),
+                evidence=[],
+                derived_from=["PRO"],
+                cut_available=cut or 1,
+            )
+            self.nodes[key] = node
+            self._fingerprints.add(key)
+            self._graph.add_node(key)
+            # Attach to everything already standing against this subject —
+            # the connection the demo is showing.
+            for other_id, other in list(self.nodes.items()):
+                if other_id != key and other.usubjid == usubjid:
+                    self._add_edge(key, other_id, "TEMPORAL_PROXIMITY", 0.9)
 
-        # Link it to everything already standing against this subject. A
-        # symptom the patient reports is, by construction, about the same
-        # person as their existing findings — that is the connection the
-        # demo is showing.
-        for other_id, other in list(self.nodes.items()):
-            if other_id == key or other.usubjid != usubjid:
-                continue
-            self._add_edge(key, other_id, "TEMPORAL_PROXIMITY", 0.9)
+        # Accumulate onto the existing node.
+        if seq is not None:
+            node.evidence.append(RecordRef(domain="PRO", usubjid=usubjid, seq=seq))
+        reported = self.reported_terms.setdefault(key, [])
+        if term:
+            reported.append({"term": term, "quote": quote,
+                             "pro_type": record.get("pro_type")})
         return node
 
     # -------------------------------------------------------------- edges
@@ -222,7 +235,9 @@ class FindingGraph:
     def snapshot(self) -> dict:
         """The shape GET /api/atlas/finding-graph returns."""
         return {
-            "nodes": [n.model_dump(mode="json") for n in self.nodes.values()],
+            "nodes": [dict(n.model_dump(mode="json"),
+                           reported=self.reported_terms.get(n.finding_id, []))
+                      for n in self.nodes.values()],
             "edges": [e.model_dump(mode="json") for e in self.edges],
             "clusters": self.clusters(),
             "centrality": self.centrality(),

@@ -201,3 +201,49 @@ body { background: var(--bg); color: var(--text); }
 .tag-SYMPTOM { background: rgba(79,195,247,0.14); color: var(--accent); }
 .tag-CONMED_MENTION { background: rgba(171,71,188,0.16); color: #ce93d8; }
 .tag-OTHER { background: rgba(138,151,166,0.15); color: var(--muted); }
+
+/* ------------------------------------------------------------ 3D graph */
+.fg-body { display: grid; grid-template-columns: 1fr 260px; gap: 12px; align-items: start; }
+@media (max-width: 1250px) { .fg-body { grid-template-columns: 1fr; } }
+
+.fg3d-wrap { position: relative; border-radius: 10px; overflow: hidden; }
+.fg3d-mount { width: 100%; height: 480px; }
+.fg3d-mount canvas { display: block; cursor: grab; }
+.fg3d-hint {
+  position: absolute; bottom: 8px; left: 10px; font-size: 0.7rem;
+  color: var(--muted); background: rgba(0,0,0,0.45); padding: 3px 9px; border-radius: 6px;
+}
+.fg3d-hover {
+  position: absolute; top: 8px; left: 10px; font-size: 0.75rem; color: var(--text);
+  background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 6px;
+}
+
+.fg-detail {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  background: var(--bg); font-size: 0.8rem; max-height: 480px; overflow-y: auto;
+}
+.fg-detail-empty { color: var(--muted); line-height: 1.5; }
+.fg-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.fg-detail-code { font-weight: 600; font-size: 0.78rem; }
+.fg-detail-close {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 1.2rem; line-height: 1; padding: 0 2px;
+}
+.fg-detail-close:hover { color: var(--text); }
+.fg-detail-grid {
+  display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 10px 0 0;
+}
+.fg-detail-grid dt { color: var(--muted); }
+.fg-detail-grid dd { margin: 0; }
+.fg-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent); font: inherit; text-decoration: underline;
+}
+.fg-detail-section { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.fg-detail-section h4 { margin: 0 0 7px; font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+.fg-detail-muted { color: var(--muted); margin: 3px 0; font-size: 0.76rem; }
+.fg-quote { margin-bottom: 8px; }
+.fg-quote q { display: block; color: var(--muted); font-style: italic; margin-top: 3px; line-height: 1.4; }
+.fg-evidence { list-style: none; margin: 0; padding: 0; }
+.fg-evidence li { padding: 1px 0; }
+.fg-evidence code, .fg-detail-muted code { font-size: 0.72rem; color: var(--accent); }

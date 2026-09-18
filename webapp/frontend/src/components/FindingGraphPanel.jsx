@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import gsap from 'gsap'
+import FindingGraph3D, { hexFor } from './FindingGraph3D.jsx'
+import FindingDetail from './FindingDetail.jsx'
 
 /**
  * Act 2 — the whole finding graph over the real study, drawn as a graph.
@@ -18,26 +19,7 @@ import gsap from 'gsap'
  * twice in a row. This is stable, instant, and readable.
  */
 
-const CODE_COLOURS = {
-  HYS_LAW_CANDIDATE: '#ef5350',
-  SAE_MISCODED: '#ff7043',
-  EXCLUSION_VIOLATION: '#ffa726',
-  INCLUSION_VIOLATION: '#ffca28',
-  DOSING_ERROR: '#ab47bc',
-  PROHIBITED_CONMED: '#7e57c2',
-  AE_BEFORE_FIRST_DOSE: '#42a5f5',
-  DUPLICATE_SUBJECT: '#26c6da',
-  MISSING_EXPOSURE_RECORD: '#26a69a',
-  LAB_UNIT_MISMATCH: '#66bb6a',
-  VISIT_OUT_OF_WINDOW: '#78909c',
-  // What the patient said, not what a detector found — deliberately the
-  // accent colour so it reads as 'added by this conversation'.
-  PATIENT_REPORTED: '#4fc3f7',
-}
-const colourFor = (code) => CODE_COLOURS[code] || '#8a97a6'
 
-const W = 760
-const H = 560
 
 function layout(nodes, clusters) {
   const pos = new Map()
@@ -75,15 +57,16 @@ function layout(nodes, clusters) {
   return { pos, byId }
 }
 
-export default function FindingGraphPanel({ apiBase, refreshKey, subject }) {
+export default function FindingGraphPanel({ apiBase, refreshKey, subject,
+                                            onSelectSubject }) {
   const [snapshot, setSnapshot] = useState(
     { nodes: [], edges: [], clusters: [], centrality: {} })
   const [codeFilter, setCodeFilter] = useState(null)
-  const [hovered, setHovered] = useState(null)
+  const [selected, setSelected] = useState(null)
   const [error, setError] = useState(null)
   const seenIds = useRef(null)          // null until the first load completes
   const newIds = useRef(new Set())
-  const svgRef = useRef(null)
+  const reportCounts = useRef(new Map())
 
   useEffect(() => {
     let cancelled = false
@@ -96,7 +79,24 @@ export default function FindingGraphPanel({ apiBase, refreshKey, subject }) {
           // First load is the seeded baseline — nothing is "new" yet.
           newIds.current = new Set()
         } else {
-          newIds.current = new Set([...ids].filter((id) => !seenIds.current.has(id)))
+          // Accumulate across the whole session rather than diffing one poll
+          // against the last. A patient-reported node is created once and then
+          // GROWS as the person says more, so a per-poll diff would light it
+          // up for one turn and then forget it — and "added this session"
+          // would read 0 while the conversation was still adding to it.
+          for (const id of ids) {
+            if (!seenIds.current.has(id)) newIds.current.add(id)
+          }
+          // A node that gained new patient-reported terms counts as touched
+          // this session too, even though its id is not new.
+          for (const n of data.nodes) {
+            const before = reportCounts.current.get(n.finding_id) ?? null
+            const now = (n.reported || []).length
+            if (before !== null && now > before) newIds.current.add(n.finding_id)
+          }
+        }
+        for (const n of data.nodes) {
+          reportCounts.current.set(n.finding_id, (n.reported || []).length)
         }
         seenIds.current = ids
         setSnapshot(data)
@@ -106,18 +106,6 @@ export default function FindingGraphPanel({ apiBase, refreshKey, subject }) {
     return () => { cancelled = true }
   }, [apiBase, refreshKey])
 
-  const { pos } = useMemo(
-    () => layout(snapshot.nodes, snapshot.clusters), [snapshot])
-
-  // Animate in anything that appeared since the last poll.
-  useEffect(() => {
-    if (!svgRef.current || newIds.current.size === 0) return
-    const sel = svgRef.current.querySelectorAll('[data-new="1"]')
-    if (sel.length) {
-      gsap.fromTo(sel, { scale: 0, opacity: 0, transformOrigin: '50% 50%' },
-        { scale: 1, opacity: 1, duration: 0.7, ease: 'back.out(2)', stagger: 0.08 })
-    }
-  }, [snapshot])
 
   const codes = useMemo(() => {
     const counts = {}
@@ -125,13 +113,6 @@ export default function FindingGraphPanel({ apiBase, refreshKey, subject }) {
     return Object.entries(counts).sort((a, b) => b[1] - a[1])
   }, [snapshot])
 
-  const visible = (n) =>
-    (!codeFilter || n.code === codeFilter)
-
-  const shownNodes = snapshot.nodes.filter(visible)
-  const shownIds = new Set(shownNodes.map((n) => n.finding_id))
-  const shownEdges = snapshot.edges.filter(
-    (e) => shownIds.has(e.from_finding_id) && shownIds.has(e.to_finding_id))
 
   const newCount = newIds.current.size
   const subjectNodes = snapshot.nodes.filter((n) => n.usubjid === subject).length
@@ -154,7 +135,7 @@ export default function FindingGraphPanel({ apiBase, refreshKey, subject }) {
                   className={`fg-chip${codeFilter === code ? ' active' : ''}`}
                   onClick={() => setCodeFilter(codeFilter === code ? null : code)}
                   title={`${code} — ${n}`}>
-            <i style={{ background: colourFor(code) }} />
+            <i style={{ background: hexFor(code) }} />
             {code.replace(/_/g, ' ').toLowerCase()} <b>{n}</b>
           </button>
         ))}
@@ -165,52 +146,24 @@ export default function FindingGraphPanel({ apiBase, refreshKey, subject }) {
       {snapshot.nodes.length === 0 && !error ? (
         <div className="fg-empty">No findings yet.</div>
       ) : (
-        <svg ref={svgRef} className="fg-svg" viewBox={`0 0 ${W} ${H}`}
-             data-testid="finding-graph-svg">
-          {shownEdges.map((e, i) => {
-            const a = pos.get(e.from_finding_id)
-            const b = pos.get(e.to_finding_id)
-            if (!a || !b) return null
-            return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                         className={`fg-edge fg-edge-${e.relation}`} />
-          })}
-          {shownNodes.map((n) => {
-            const p = pos.get(n.finding_id)
-            if (!p) return null
-            const isNew = newIds.current.has(n.finding_id)
-            const isSubject = n.usubjid === subject
-            const fromPatient = (n.derived_from || []).includes('PRO')
-            const hub = snapshot.centrality[n.finding_id] || 0
-            const r = 4.5 + Math.min(5, hub * 55) + (isSubject ? 1.6 : 0)
-            return (
-              <g key={n.finding_id} data-new={isNew ? '1' : '0'}
-                 onMouseEnter={() => setHovered(n)} onMouseLeave={() => setHovered(null)}>
-                {(isNew || fromPatient) && (
-                  <circle cx={p.x} cy={p.y} r={r + 5} className="fg-node-halo" />
-                )}
-                <circle
-                  cx={p.x} cy={p.y} r={r}
-                  fill={colourFor(n.code)}
-                  className={`fg-node${isSubject ? ' subject' : ''}${fromPatient ? ' from-patient' : ''}`}
-                  data-code={n.code}
-                  data-usubjid={n.usubjid || ''}
-                />
-              </g>
-            )
-          })}
-        </svg>
+        <div className="fg-body">
+          <FindingGraph3D
+            snapshot={snapshot}
+            subject={subject}
+            newIds={newIds.current}
+            codeFilter={codeFilter}
+            selectedId={selected?.finding_id || null}
+            onSelect={(id) => setSelected(
+              id ? snapshot.nodes.find((n) => n.finding_id === id) || null : null)}
+          />
+          <FindingDetail node={selected} onClose={() => setSelected(null)}
+                         onSelectSubject={onSelectSubject} />
+        </div>
       )}
 
       <div className="fg-footer">
         <span className="fg-key"><i className="k-subject" /> this subject ({subjectNodes})</span>
         <span className="fg-key"><i className="k-new" /> added this session ({newCount})</span>
-        {hovered && (
-          <span className="fg-hover">
-            <b>{hovered.code.replace(/_/g, ' ')}</b> · {hovered.usubjid || hovered.site}
-            {(hovered.derived_from || []).length > 0 &&
-              <> · from {hovered.derived_from.join(', ')}</>}
-          </span>
-        )}
       </div>
     </div>
   )

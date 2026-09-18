@@ -172,7 +172,7 @@ export default function Atlas() {
         </section>
         <section className="atlas-graph-col">
           <FindingGraphPanel apiBase={API_BASE} refreshKey={graphVersion}
-                             subject={usubjid} />
+                             subject={usubjid} onSelectSubject={setUsubjid} />
         </section>
       </div>
     </div>

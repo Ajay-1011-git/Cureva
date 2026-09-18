@@ -40,32 +40,39 @@ function addRotation(bone, x, y, z) {
  * @param {number} t   elapsed seconds
  */
 export function applyIdleLife(bones, t) {
-  // Breath: ~4.5s cycle, the resting adult rate. Chest expands, shoulders
-  // lift a touch behind it, head rides along very slightly.
-  const breath = Math.sin(t * (2 * Math.PI / 4.5))
-  addRotation(bones.get('chest'), breath * DEG(1.1), 0, 0)
-  addRotation(bones.get('upperChest'), breath * DEG(0.8), 0, 0)
-  addRotation(bones.get('leftShoulder'), breath * DEG(0.9), 0, 0)
-  addRotation(bones.get('rightShoulder'), breath * DEG(0.9), 0, 0)
-  addRotation(bones.get('neck'), breath * DEG(-0.5), 0, 0)
+  // Breath: ~4.2s cycle, a resting adult rate. Chest expands, shoulders lift
+  // a beat behind it, head rides along. Amplitudes here were raised after
+  // looking at it on screen — at ~1° the motion was mathematically present
+  // and visually absent, which is the same as not having built it.
+  const breath = Math.sin(t * (2 * Math.PI / 4.2))
+  const breathLag = Math.sin(t * (2 * Math.PI / 4.2) - 0.5)
+  addRotation(bones.get('chest'), breath * DEG(2.6), 0, 0)
+  addRotation(bones.get('upperChest'), breath * DEG(2.0), 0, 0)
+  addRotation(bones.get('leftShoulder'), breathLag * DEG(2.6), 0, DEG(-1) * breathLag)
+  addRotation(bones.get('rightShoulder'), breathLag * DEG(2.6), 0, DEG(1) * breathLag)
+  addRotation(bones.get('neck'), breath * DEG(-1.2), 0, 0)
 
-  // Weight shift: much slower, and on the hips/spine so the whole figure
-  // moves as one rather than the head drifting on a static body.
+  // Weight shift: much slower, on hips and spine so the whole figure moves as
+  // one rather than the head drifting on a static body.
   const sway = Math.sin(t * (2 * Math.PI / 11))
   const sway2 = Math.sin(t * (2 * Math.PI / 7) + 1.1)
-  addRotation(bones.get('hips'), 0, sway * DEG(1.4), sway2 * DEG(0.7))
-  addRotation(bones.get('spine'), 0, sway * DEG(-0.6), sway2 * DEG(-0.4))
+  addRotation(bones.get('hips'), 0, sway * DEG(3.0), sway2 * DEG(1.8))
+  addRotation(bones.get('spine'), 0, sway * DEG(-1.4), sway2 * DEG(-1.0))
 
-  // Micro head motion — people are never perfectly still above the neck.
+  // Head: never perfectly still above the neck.
   addRotation(bones.get('head'),
-    Math.sin(t * (2 * Math.PI / 6.3) + 0.4) * DEG(1.2),
-    Math.sin(t * (2 * Math.PI / 9.1)) * DEG(1.8),
-    Math.sin(t * (2 * Math.PI / 13)) * DEG(0.8))
+    Math.sin(t * (2 * Math.PI / 6.3) + 0.4) * DEG(2.4),
+    Math.sin(t * (2 * Math.PI / 9.1)) * DEG(4.0),
+    Math.sin(t * (2 * Math.PI / 13)) * DEG(1.6))
 
-  // Arms hang with a slight, slow life of their own.
+  // Arms swing gently from the shoulder and settle at the elbow, on periods
+  // that don't match the breath — so nothing ever looks like it is on a loop.
   const armDrift = Math.sin(t * (2 * Math.PI / 8.5))
-  addRotation(bones.get('leftUpperArm'), armDrift * DEG(0.8), 0, 0)
-  addRotation(bones.get('rightUpperArm'), -armDrift * DEG(0.8), 0, 0)
+  const armDrift2 = Math.sin(t * (2 * Math.PI / 6.7) + 2.2)
+  addRotation(bones.get('leftUpperArm'), armDrift * DEG(2.2), 0, armDrift2 * DEG(1.4))
+  addRotation(bones.get('rightUpperArm'), -armDrift * DEG(2.2), 0, -armDrift2 * DEG(1.4))
+  addRotation(bones.get('leftLowerArm'), armDrift2 * DEG(2.0), 0, 0)
+  addRotation(bones.get('rightLowerArm'), -armDrift2 * DEG(2.0), 0, 0)
 }
 
 /**

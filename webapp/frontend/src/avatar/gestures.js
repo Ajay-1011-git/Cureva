@@ -22,7 +22,38 @@ import * as THREE from 'three'
 
 const DEG = THREE.MathUtils.degToRad
 
-/** bone -> {x,y,z} target Euler offset from rest, in radians. */
+/**
+ * The relaxed conversational stance every pose is built on.
+ *
+ * This rig's REST pose is a T-pose — arms straight out horizontally — because
+ * that is how the .glb was authored, not because it is a pose anyone would
+ * hold. Leaving `idle: {}` meant the avatar stood there with its arms spread
+ * like a scarecrow, and the small idle motion layered on top was invisible
+ * against a silhouette that was already wrong.
+ *
+ * So every gesture starts from here: arms down at the sides, elbows very
+ * slightly bent, shoulders dropped. Gesture poses below are offsets FROM this
+ * stance, not from the T-pose.
+ *
+ * Angles were found by rendering and looking, not derived — see the note on
+ * explaining_gesture about why the axes are not the obvious ones on this rig.
+ */
+export const RELAXED_BASE = {
+  // Bring the arms down to the sides. Positive X lowers on this rig.
+  rightUpperArm: { x: DEG(74), y: 0, z: DEG(-6) },
+  leftUpperArm: { x: DEG(74), y: 0, z: DEG(6) },
+  // A straight arm reads as stiff; real arms rest with a slight bend.
+  rightLowerArm: { x: DEG(6), y: DEG(-12), z: 0 },
+  leftLowerArm: { x: DEG(6), y: DEG(12), z: 0 },
+  // Hands turned very slightly inward, as they hang.
+  rightHand: { x: 0, y: DEG(-8), z: 0 },
+  leftHand: { x: 0, y: DEG(8), z: 0 },
+  // Shoulders settle rather than sitting squared-up.
+  rightShoulder: { x: DEG(3), y: 0, z: 0 },
+  leftShoulder: { x: DEG(3), y: 0, z: 0 },
+}
+
+/** bone -> {x,y,z} target Euler offset from RELAXED_BASE, in radians. */
 export const GESTURE_POSES = {
   idle: {},
   listening: {
@@ -30,29 +61,35 @@ export const GESTURE_POSES = {
     neck: { x: DEG(2), y: 0, z: 0 },
   },
   concern_lean_in: {
-    head: { x: DEG(10), y: 0, z: 0 },
-    spine: { x: DEG(4), y: 0, z: 0 },
-    chest: { x: DEG(3), y: 0, z: 0 },
+    head: { x: DEG(9), y: 0, z: 0 },
+    spine: { x: DEG(5), y: 0, z: 0 },
+    chest: { x: DEG(4), y: 0, z: 0 },
+    // Hands come forward slightly — the "tell me more" posture.
+    rightUpperArm: { x: DEG(-12), y: 0, z: 0 },
+    leftUpperArm: { x: DEG(-12), y: 0, z: 0 },
+    rightLowerArm: { x: DEG(-16), y: DEG(-8), z: 0 },
+    leftLowerArm: { x: DEG(-16), y: DEG(8), z: 0 },
   },
   explaining_gesture: {
-    // Confirmed empirically (not assumed): on this rig's rest orientation,
-    // X-axis rotation moves the upper-arm bone in the image plane -- Y and Z
-    // rotate it toward/away from camera (invisible from a front view). This
-    // was found by trying axes and inspecting real screenshots, the same way
-    // the source loader.ts's own comments describe having to measure this
-    // rig's actual pose rather than assume a standard convention.
+    // Offsets FROM the relaxed stance. X-axis rotation is what moves the
+    // upper-arm bone in the image plane on this rig — Y and Z rotate it
+    // toward or away from the camera, which is invisible from a front view.
+    // Found by rendering and looking, the same way the source loader.ts's
+    // comments describe having to measure this rig rather than assume a
+    // standard convention.
     head: { x: DEG(-4), y: 0, z: 0 },
-    rightUpperArm: { x: DEG(-70), y: 0, z: 0 },
-    rightLowerArm: { x: DEG(-30), y: DEG(-20), z: 0 },
+    rightUpperArm: { x: DEG(-48), y: 0, z: DEG(-10) },
+    rightLowerArm: { x: DEG(-26), y: DEG(-24), z: 0 },
+    rightHand: { x: DEG(-10), y: 0, z: 0 },
   },
   reassure_nod: {
     // animated (a nod cycle), handled specially in the render loop below
     head: { x: 0, y: 0, z: 0 },
   },
   farewell_wave: {
-    rightUpperArm: { x: 0, y: 0, z: DEG(-70) },
-    rightLowerArm: { x: 0, y: DEG(-30), z: 0 },
-    // animated (a wave cycle), handled specially in the render loop below
+    // Arm up and out from the relaxed stance, forearm waving (animated below).
+    rightUpperArm: { x: DEG(-62), y: 0, z: DEG(-18) },
+    rightLowerArm: { x: DEG(-34), y: DEG(-18), z: 0 },
   },
 }
 
@@ -76,8 +113,13 @@ export function applyGesture(bones, restPose, gestureName, blend, t) {
   for (const [role, bone] of bones) {
     const rest = restPose.get(role)
     if (!rest) continue
+    // Every pose is the relaxed stance plus this gesture's offset from it.
+    const base = RELAXED_BASE[role]
     const target = pose[role]
-    const euler = new THREE.Euler(target?.x ?? 0, target?.y ?? 0, target?.z ?? 0)
+    const euler = new THREE.Euler(
+      (base?.x ?? 0) + (target?.x ?? 0),
+      (base?.y ?? 0) + (target?.y ?? 0),
+      (base?.z ?? 0) + (target?.z ?? 0))
     let deltaQuat = new THREE.Quaternion().setFromEuler(euler)
 
     if (gesture === 'reassure_nod' && role === 'head') {
@@ -86,8 +128,10 @@ export function applyGesture(bones, restPose, gestureName, blend, t) {
     }
     if (gesture === 'farewell_wave' && role === 'rightLowerArm') {
       const wave = Math.sin(t * 6) * DEG(18)
-      deltaQuat = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, target.y + wave, 0))
+      deltaQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        (base?.x ?? 0) + (target?.x ?? 0),
+        (base?.y ?? 0) + (target?.y ?? 0) + wave,
+        (base?.z ?? 0) + (target?.z ?? 0)))
     }
 
     const targetQuat = rest.quaternion.clone().multiply(deltaQuat)

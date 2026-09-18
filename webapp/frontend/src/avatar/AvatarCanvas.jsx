@@ -49,10 +49,15 @@ export default function AvatarCanvas({ gesture = 'idle', audioEl = null }) {
 
       if (audioEl) speechAmp = new SpeechAmplitude(audioEl)
 
-      const clock = new THREE.Clock()
+      // THREE.Clock is deprecated in three r18x; performance.now() is what
+      // it wrapped anyway and avoids the console warning on every mount.
+      let last = performance.now()
+      const started = last
       const tick = () => {
-        const dt = clock.getDelta()
-        const t = clock.getElapsedTime()
+        const now = performance.now()
+        const dt = Math.min(0.1, (now - last) / 1000)   // clamp after a tab switch
+        const t = (now - started) / 1000
+        last = now
 
         // 1. the held gesture pose, eased in over ~350ms rather than snapping
         stateRef.current.blend = Math.min(1, stateRef.current.blend + dt / 0.35)
