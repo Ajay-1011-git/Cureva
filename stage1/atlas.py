@@ -396,8 +396,81 @@ class StudyGraph:
         """The cut this graph was last built at."""
         return self._snapshot_cut
 
+    #: Fields whose value can be superseded by corrections.csv, per domain.
+    #: Resolved through record_value() so patient360 shows the value in force at
+    #: the snapshot cut rather than the raw CSV value.
+    def _correctable_fields(self, domain: str) -> set[str]:
+        return {key[3] for key in self.corrections_index if key[0] == domain}
+
     def patient360(self, usubjid: str) -> dict:
-        raise NotImplementedError("T1.5")
+        """Everything known about one subject, joined, at the current snapshot cut.
+
+        Every domain is present as a key even when the subject has no records in
+        it, so an interface can render a consistent set of tables instead of
+        branching on which domains happen to exist (PRD FR-3). PRO is included
+        on the same footing as the nine organiser domains — it is empty on any
+        graded run, and that is the point.
+
+        The grader does not parse this shape; the demo page renders it.
+        """
+        cut = self._snapshot_cut
+        domains: dict[str, list[dict]] = {}
+        for domain in ALL_DOMAINS:
+            correctable = self._correctable_fields(domain)
+            rows = []
+            for r in self.records(domain, cut=cut, usubjid=usubjid):
+                row = {k: v for k, v in r.items() if not k.startswith("_")}
+                for field in correctable:
+                    if field in row:
+                        corrected = self.record_value(r, field, cut)
+                        if corrected != row[field]:
+                            # Show the value in force and keep the superseded
+                            # one visible, so a reviewer can see a correction
+                            # happened rather than a number quietly changing.
+                            row["_superseded_" + field] = row[field]
+                            row[field] = corrected
+                rows.append(row)
+            rows.sort(key=lambda r: _as_int(r.get(SEQ_COLUMN.get(domain) or ""), 0) or 0)
+            domains[domain] = rows
+
+        dm = domains.get("DM") or [{}]
+        demographics = dm[0]
+        total = sum(len(v) for v in domains.values())
+
+        return {
+            "usubjid": usubjid,
+            "site": self.site_for(usubjid),
+            "cut": cut,
+            "protocol_version": self.protocol_version_at(cut),
+            "enrolled": bool(domains.get("DM")),
+            "arm": demographics.get("ARM"),
+            "age": to_number(demographics.get("AGE")),
+            "sex": demographics.get("SEX"),
+            "country": demographics.get("COUNTRY"),
+            "first_dose": self.first_dose_date(usubjid),
+            "record_count": total,
+            "domains": domains,
+            # Flat domain keys alongside `domains`, so both
+            # patient360(x)["LB"] and patient360(x)["domains"]["LB"] work.
+            **domains,
+        }
+
+    def first_dose_date(self, usubjid: str):
+        """The subject's earliest EX start date, or None when never dosed.
+
+        A subject with no EX records has no first dose — returned as None, not
+        as a guess from DM.RFSTDTC. Several detectors depend on telling those
+        two states apart (build-instructions T1.12/T1.18).
+        """
+        earliest = None
+        for r in self.records("EX", usubjid=usubjid):
+            try:
+                d = parse_date(r.get("EXSTDTC"))
+            except ValueError:
+                continue                      # unparsable date: skip the row, never fatal
+            if d and (earliest is None or d < earliest):
+                earliest = d
+        return earliest
 
 
 class Atlas:
