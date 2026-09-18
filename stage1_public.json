@@ -1,0 +1,238 @@
+{
+ "rows": [
+  {
+   "id": "Q001",
+   "kind": "count",
+   "weight": 1.0,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "3/3",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": 3,
+   "got": 3,
+   "error": ""
+  },
+  {
+   "id": "Q002",
+   "kind": "count",
+   "weight": 1.0,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "n/a",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": 0,
+   "got": 0,
+   "error": ""
+  },
+  {
+   "id": "Q003",
+   "kind": "count",
+   "weight": 1.0,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "1/1",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": 1,
+   "got": 1,
+   "error": ""
+  },
+  {
+   "id": "Q013",
+   "kind": "lookup",
+   "weight": 1.5,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "6/6",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": [
+    "LB:042-S07-001:31",
+    "LB:042-S07-001:32",
+    "LB:042-S07-001:33",
+    "LB:042-S07-001:34",
+    "LB:042-S07-001:35",
+    "LB:042-S07-001:36"
+   ],
+   "got": [
+    "LB:042-S07-001:31",
+    "LB:042-S07-001:32",
+    "LB:042-S07-001:33",
+    "LB:042-S07-001:34",
+    "LB:042-S07-001:35",
+    "LB:042-S07-001:36"
+   ],
+   "error": ""
+  },
+  {
+   "id": "Q014",
+   "kind": "lookup",
+   "weight": 1.5,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "6/6",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": [
+    "LB:042-S08-014:31",
+    "LB:042-S08-014:32",
+    "LB:042-S08-014:33",
+    "LB:042-S08-014:34",
+    "LB:042-S08-014:35",
+    "LB:042-S08-014:36"
+   ],
+   "got": [
+    "LB:042-S08-014:31",
+    "LB:042-S08-014:32",
+    "LB:042-S08-014:33",
+    "LB:042-S08-014:34",
+    "LB:042-S08-014:35",
+    "LB:042-S08-014:36"
+   ],
+   "error": ""
+  },
+  {
+   "id": "Q018",
+   "kind": "finding",
+   "weight": 3.0,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "7/7",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": [
+    "042-S05-003",
+    "042-S07-001",
+    "042-S08-014"
+   ],
+   "got": [
+    "042-S05-003",
+    "042-S07-001",
+    "042-S08-014"
+   ],
+   "error": ""
+  },
+  {
+   "id": "Q019",
+   "kind": "finding",
+   "weight": 2.0,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "16/16",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": [
+    "042-S02-010",
+    "042-S02-015",
+    "042-S03-016",
+    "042-S07-016",
+    "042-S09-010",
+    "042-S09-013",
+    "042-S10-012",
+    "042-S11-005"
+   ],
+   "got": [
+    "042-S02-010",
+    "042-S02-015",
+    "042-S03-016",
+    "042-S07-016",
+    "042-S09-010",
+    "042-S09-013",
+    "042-S10-012",
+    "042-S11-005"
+   ],
+   "error": ""
+  },
+  {
+   "id": "Q020",
+   "kind": "finding",
+   "weight": 2.5,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "2/2",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": [
+    "042-S02-013",
+    "042-S05-021"
+   ],
+   "got": [
+    "042-S02-013",
+    "042-S05-021"
+   ],
+   "error": ""
+  },
+  {
+   "id": "Q028",
+   "kind": "trap",
+   "weight": 2.0,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "n/a",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": [],
+   "got": [],
+   "error": ""
+  },
+  {
+   "id": "Q029",
+   "kind": "trap",
+   "weight": 2.0,
+   "correct": 1.0,
+   "evidence_valid": 1.0,
+   "evidence": "n/a",
+   "limits_ok": true,
+   "steps": 0,
+   "tokens": 0,
+   "seconds": 0.0,
+   "score": 1.0,
+   "expected": [],
+   "got": [],
+   "error": ""
+  }
+ ],
+ "gate": {
+  "score": 100.0,
+  "clean_evidence_pct": 100.0,
+  "traps": "2/2",
+  "limits_ok": true,
+  "pass": true
+ },
+ "graph": {
+  "nodes": 26925,
+  "edges": 26925,
+  "subjects": 241,
+  "cut": null,
+  "ms": 3
+ }
+}

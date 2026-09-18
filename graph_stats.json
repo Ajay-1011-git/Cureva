@@ -1,0 +1,30 @@
+{
+  "nodes": 26925,
+  "edges": 26925,
+  "subjects": 241,
+  "cut": null,
+  "ms": 3,
+  "per_domain": {
+    "DM": 241,
+    "AE": 294,
+    "LB": 14400,
+    "VS": 7200,
+    "EX": 2154,
+    "CM": 468,
+    "DS": 240,
+    "MH": 488,
+    "EG": 1440,
+    "PRO": 0
+  },
+  "corrections_applied": 200,
+  "protocol_version": 3,
+  "malformed_rows": 0,
+  "documents": [
+    "lab-manual",
+    "lab-manual_v3",
+    "protocol_v1",
+    "protocol_v2",
+    "protocol_v3",
+    "sap"
+  ]
+}
