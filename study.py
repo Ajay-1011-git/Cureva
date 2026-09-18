@@ -212,15 +212,165 @@ def to_number(value: Any) -> float | None:
         return None
 
 
+class LabStandardisationError(Exception):
+    """A lab value could not be put into the central laboratory's unit."""
+
+
+class UnitMismatch(LabStandardisationError):
+    """The record's unit matches no reference-range row and no known conversion.
+
+    This is a real data-quality problem about the record — it is raised even
+    when the value itself is unusable, because the mismatch is a fact about the
+    unit, not the number. stage1's LAB_UNIT_MISMATCH detector turns each of
+    these into a Finding (build-instructions T1.19).
+    """
+
+
+class NoReferenceRange(LabStandardisationError):
+    """No CENTRAL row exists for this test, so there is no central unit at all.
+
+    Deliberately NOT a subclass of UnitMismatch: a test the reference file never
+    describes has no unit to mismatch. Reporting it as LAB_UNIT_MISMATCH would
+    be a false positive on every record of that test.
+    """
+
+
+def _norm_unit(unit: Any) -> str:
+    """Canonical form of a unit string, for comparison only.
+
+    Folds case, strips spaces, and maps both the micro sign (U+00B5) and Greek
+    small mu (U+03BC) to a plain "u", so "µkat/L", "μkat/L" and "ukat/L" are one
+    unit. The practice data writes "ukat/L"; lab-manual.md writes "µkat/L".
+    """
+    if unit is None:
+        return ""
+    return (str(unit).strip().lower()
+            .replace("\u00b5", "u").replace("\u03bc", "u")
+            .replace(" ", ""))
+
+
+# Catalytic activity. 1 kat = 1 mol/s and 1 U = 1 µmol/min, so 1 µkat/L is
+# exactly 60 U/L for ANY enzyme — this pair is analyte-independent and safe to
+# apply to whichever enzyme a hidden study happens to report that way.
+_UNIT_FACTORS: dict[tuple[str, str], float] = {
+    ("ukat/l", "u/l"): 60.0,
+    ("u/l", "ukat/l"): 1.0 / 60.0,
+}
+
+# Molar <-> mass conversions depend on the analyte's molar mass, so these are
+# keyed by test as well as by unit pair. Constants from build-instructions §B.2.
+_ANALYTE_FACTORS: dict[tuple[str, str, str], float] = {
+    ("GLUC",  "mmol/l", "mg/dl"): 18.0,
+    ("GLUC",  "mg/dl",  "mmol/l"): 1.0 / 18.0,
+    ("CREAT", "umol/l", "mg/dl"): 1.0 / 88.4,
+    ("CREAT", "mg/dl",  "umol/l"): 88.4,
+    ("BILI",  "umol/l", "mg/dl"): 1.0 / 17.1,
+    ("BILI",  "mg/dl",  "umol/l"): 17.1,
+}
+
+
+def central_range(testcd: str, ranges: list[dict]) -> tuple[str, float | None, float | None]:
+    """(central_unit, low, high) for a test, from the LAB=="CENTRAL" row.
+
+    Raises NoReferenceRange when the reference file does not describe the test.
+    """
+    for r in ranges:
+        if (r.get("LBTESTCD") or "").strip().upper() == (testcd or "").strip().upper() \
+                and (r.get("LAB") or "").strip().upper() == "CENTRAL":
+            return (r.get("UNIT") or "").strip(), to_number(r.get("LOW")), to_number(r.get("HIGH"))
+    raise NoReferenceRange(f"no CENTRAL reference range for test {testcd!r}")
+
+
 def standardise_lab(testcd: str, value: Any, unit: str | None, ranges: list[dict]):
-    """TODO: the most important function you will write today.
+    """Put one laboratory value into the central laboratory's unit.
 
-    Not every site reports in the central laboratory's unit. Use `ranges` — which
-    carries a LAB column — to work out which range applies, and convert where
-    needed, BEFORE comparing anything to anything.
+    Returns (value_in_central_unit, central_unit, was_converted). Every
+    threshold comparison in stage1 goes through here first — comparing a raw
+    LBORRES to a central range is the single mistake that loses the gate.
 
-    Return (value_in_central_unit, central_unit, was_converted)."""
-    raise NotImplementedError
+    Which range applies is decided by the record's OWN unit, not by its site.
+    reference_ranges.csv carries a LAB column (CENTRAL plus one row per local
+    laboratory), and the local rows exist precisely because those laboratories
+    report in a different unit. Reading the unit off the record is strictly
+    more robust than inferring a laboratory from the subject's site id: it
+    keeps working when a hidden study's local laboratory sits at a different
+    site, serves several sites, or when one site's records are mixed. This
+    function has no notion of "site" at all, by design — nothing here can be
+    accidentally tuned to whichever site happens to vary in the practice data.
+
+    A value that is not a usable number ("ND", "<5", "") comes back as None
+    with was_converted=False; the unit check still runs first, so a record with
+    a bad unit is reported as such even when its value is unusable.
+
+    Raises:
+        UnitMismatch     — unit is neither the central unit nor a known
+                           conversion source for this test.
+        NoReferenceRange — the reference file has no CENTRAL row for this test.
+    """
+    central_unit, _low, _high = central_range(testcd, ranges)
+
+    src = _norm_unit(unit)
+    dst = _norm_unit(central_unit)
+
+    if src == dst:
+        return to_number(value), central_unit, False
+
+    if not src:
+        raise UnitMismatch(
+            f"{testcd}: record carries no unit; central laboratory reports {central_unit!r}")
+
+    tc = (testcd or "").strip().upper()
+    factor = _ANALYTE_FACTORS.get((tc, src, dst))
+    if factor is None:
+        factor = _UNIT_FACTORS.get((src, dst))
+    if factor is None:
+        raise UnitMismatch(
+            f"{testcd}: unit {unit!r} is not {central_unit!r} and no conversion "
+            f"to {central_unit!r} is defined for this test")
+
+    num = to_number(value)
+    if num is None:
+        return None, central_unit, False
+    return num * factor, central_unit, True
+
+
+def check_conversion_against_ranges(ranges: list[dict], tolerance: float = 0.10) -> list[str]:
+    """Sanity-check every local-laboratory row against the conversion table.
+
+    A local row's LOW/HIGH should land near the CENTRAL row's once converted.
+    On the practice study ALT S07 gives 0.12-0.93 ukat/L -> 7.2-55.8 U/L against
+    a central 7-56: agreement to well under a percent. A hidden study whose
+    local laboratory uses a unit this table converts WRONGLY would show up here
+    as a large disagreement instead of as silently wrong thresholds.
+
+    Returns a list of human-readable warnings; empty means everything agrees.
+    This never raises and is advisory only — it is a tripwire, not a gate.
+    """
+    warnings: list[str] = []
+    for r in ranges:
+        lab = (r.get("LAB") or "").strip().upper()
+        if lab in ("", "CENTRAL"):
+            continue
+        tc = (r.get("LBTESTCD") or "").strip().upper()
+        try:
+            central_unit, c_low, c_high = central_range(tc, ranges)
+        except LabStandardisationError as exc:
+            warnings.append(f"{tc}@{lab}: {exc}")
+            continue
+        for bound, c_val in (("LOW", c_low), ("HIGH", c_high)):
+            try:
+                got, _, _ = standardise_lab(tc, r.get(bound), r.get("UNIT"), ranges)
+            except LabStandardisationError as exc:
+                warnings.append(f"{tc}@{lab} {bound}: {exc}")
+                continue
+            if got is None or c_val is None or c_val == 0:
+                continue
+            drift = abs(got - c_val) / abs(c_val)
+            if drift > tolerance:
+                warnings.append(
+                    f"{tc}@{lab} {bound}: {r.get(bound)} {r.get('UNIT')} -> {got:.4g} "
+                    f"{central_unit}, but CENTRAL says {c_val:.4g} ({drift:.0%} apart)")
+    return warnings
 
 
 # ------------------------------------------------------------------ check
