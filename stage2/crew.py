@@ -171,10 +171,46 @@ class ReviewCrew:
     """The graded six-node review cycle."""
 
     def __init__(self, data_dir: str, atlas: Atlas,
-                 state_dir: str | Path = "state"):
+                 state_dir: str | Path = "state",
+                 *, tribunal: bool = False, tribunal_budget: int = 1):
+        """`tribunal` is off by default, and that default is the whole point.
+
+        Act 3 makes 6 network calls per finding. A real cut produces well over
+        a hundred escalation-worthy findings, so deliberating on all of them
+        would mean ~1000 calls against a 30 req/min free tier and a cycle that
+        runs for an hour. TNFR-1 asks for a cycle that stays inside its time
+        budget "even when every escalation-worthy finding attempts a full
+        Tribunal round"; at this study's real volume that is not reachable, and
+        pretending otherwise would mean a graded run that times out.
+
+        So the graded path runs deterministic and offline, exactly as the
+        earlier layer did, and the Tribunal is switched on for the demo with a
+        per-cycle budget. This is the same isolation principle the TRD states,
+        applied honestly to the volume the data actually has: the Tribunal
+        informs a human, and never sits between the grader and a correct
+        verdict. G7 holds by construction rather than by hope -- with the
+        Tribunal off, on, or failing, the escalation-worthy set is identical.
+
+        `tribunal_budget` defaults to 1 because that is what the free tier
+        actually supports, measured rather than guessed: one full deliberation
+        costs ~5.7k tokens and Groq's free-tier ceiling for this model is 8000
+        tokens *per minute*. The PRD anticipated the 30 req/min ceiling; the
+        binding limit is tokens, and it binds an order of magnitude sooner. A
+        budget of 3 looks reasonable on paper and spends two of its three
+        attempts collecting 429s.
+        """
         self.data_dir = data_dir
         self.atlas = atlas
         self.graph: StudyGraph = atlas.graph
+        self.tribunal_enabled = tribunal
+        self.tribunal_budget = tribunal_budget
+        #: finding_id -> TribunalTranscript, for the review page to read.
+        self.transcripts: dict[str, Any] = {}
+        #: The last cycle's verdicts. `ReviewReport` has nowhere to carry the
+        #: escalation-worthy/watch-only split, but the review page and the
+        #: resilience tests both need it, so it is kept here rather than
+        #: bolted onto the organiser's schema.
+        self.last_verdicts: list[Verdict] = []
 
         # `Study` is constructed only for the organiser's two response
         # channels -- escalate() and query_site() -- which Atlas does not
@@ -217,6 +253,7 @@ class ReviewCrew:
 
         self._node_detect(ctx)
         self._node_medical_review(ctx)
+        self.last_verdicts = ctx.verdicts
         self._node_data_manager(ctx)
         self._node_compliance(ctx)
         self._node_human_gate(ctx)
@@ -395,6 +432,90 @@ class ReviewCrew:
                         f"{code} / {f.usubjid or f.site or 'study'}: "
                         f"{'ESCALATION-WORTHY' if escalate else 'MONITOR-ONLY'} - {rule}",
                         finding_id=fid, evidence=f.evidence[:4])
+
+        # Every rule-based verdict is now computed AND traced. Only now is the
+        # Tribunal attempted, and only ever as an addition on top.
+        self._attempt_tribunal(ctx)
+
+    # ------------------------------------------------------- Act 3 wiring
+    def _attempt_tribunal(self, ctx: CycleContext) -> None:
+        """Optional, bounded, and incapable of changing a verdict.
+
+        Contested findings only (escalation-worthy), highest severity first,
+        up to the cycle's budget. Every finding that could have been
+        deliberated but was not gets a `tribunal_skipped` line with the real
+        reason -- FR-18 means a skipped Tribunal is a decision too, and a demo
+        that quietly showed three panels for some findings and nothing for
+        others would be hiding exactly that.
+        """
+        contested = [v for v in ctx.verdicts if v.escalate]
+        if not contested:
+            return
+
+        if not self.tribunal_enabled:
+            self._trace(ctx, "MEDICAL_REVIEW", "tribunal_skipped",
+                        f"Act 3 disabled for this cycle; {len(contested)} contested "
+                        f"finding(s) carry their rule-based verdict unchanged")
+            return
+
+        rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        ordered = sorted(contested,
+                         key=lambda v: (rank.get(v.finding.severity, 9), v.finding_id))
+
+        for verdict in ordered[:self.tribunal_budget]:
+            t0 = time.perf_counter()
+            try:
+                import tribunal
+                transcript = tribunal.deliberate(
+                    self.atlas, verdict.finding, verdict.finding_id, ctx.cut)
+            except Exception as exc:                              # noqa: BLE001
+                # NFR-4: nothing from tribunal/ reaches run_cycle(). This
+                # catch exists for the import and for anything deliberate()
+                # itself failed to contain.
+                took = int(round((time.perf_counter() - t0) * 1000))
+                self._trace(ctx, "MEDICAL_REVIEW", "tribunal_skipped",
+                            f"{verdict.finding.code}: Act 3 raised "
+                            f"{type(exc).__name__}: {exc} - rule-based verdict stands",
+                            finding_id=verdict.finding_id, duration_ms=took)
+                log.warning("tribunal failed for %s: %s", verdict.finding_id, exc)
+                continue
+
+            self.transcripts[verdict.finding_id] = transcript
+            ctx.tokens_used += transcript.tokens_used
+
+            if not transcript.ran:
+                self._trace(ctx, "MEDICAL_REVIEW", "tribunal_skipped",
+                            f"{verdict.finding.code}: {transcript.skip_reason} - "
+                            f"rule-based verdict stands",
+                            finding_id=verdict.finding_id,
+                            duration_ms=transcript.duration_ms)
+                continue
+
+            verdict.tribunal_ran = True
+            arb = transcript.round3
+            final = arb.final_verdict if arb else "(no arbitration)"
+            agrees = (arb is not None
+                      and (arb.final_verdict == "ESCALATE") == verdict.escalate)
+            # Narrative and alternatives only. `verdict.escalate` is not
+            # touched here and must never be -- a Tribunal that could overturn
+            # the rule would make the cycle's correctness depend on Groq.
+            verdict.narrative = "; ".join((arb.surviving_claims if arb else [])[:3])
+            verdict.alternatives = [d.claim for d in (arb.discarded_claims if arb else [])]
+            self._trace(ctx, "MEDICAL_REVIEW", "tribunal_verdict",
+                        f"{verdict.finding.code} / {verdict.finding.usubjid}: Act 3 "
+                        f"returned {final} ({'agrees with' if agrees else 'diverges from'} "
+                        f"the rule-based verdict, which stands either way); "
+                        f"{len(arb.surviving_claims) if arb else 0} claim(s) survived, "
+                        f"{len(arb.discarded_claims) if arb else 0} discarded",
+                        finding_id=verdict.finding_id,
+                        duration_ms=transcript.duration_ms)
+
+        remaining = ordered[self.tribunal_budget:]
+        if remaining:
+            self._trace(ctx, "MEDICAL_REVIEW", "tribunal_skipped",
+                        f"{len(remaining)} further contested finding(s) exceeded this "
+                        f"cycle's Act 3 budget of {self.tribunal_budget}; each keeps "
+                        f"its rule-based verdict unchanged")
 
     # =====================================================================
     # 3. DATA MANAGER
