@@ -1772,3 +1772,59 @@ def detect_prohibited_conmed(graph: "StudyGraph", site: str | None, usubjid: str
             confidence=0.92, protocol_version=rules.version))
     findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
+
+
+@detector("DOSING_ERROR")
+def detect_dosing_error(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                        cut: int | None) -> list[Finding]:
+    """An administered dose other than the protocol's 10mg (drug) / 0mg (placebo).
+
+    Protocol §8: correct EXDOSE is 10 for EXTRT=DRUG, 0 for EXTRT=PLACEBO.
+    Anything else is a dosing error and a protocol deviation.
+
+    Two distinct problems share this detector, since both are the same
+    underlying deviation (an administered dose not matching what should have
+    been given): a wrong dose for the record's own EXTRT, and an EXTRT that
+    disagrees with the subject's randomised DM.ARM — the latter would mean the
+    wrong drug was dispensed, which the dose alone would not catch.
+    """
+    findings: list[Finding] = []
+    subjects = ([usubjid] if usubjid else
+                [r["USUBJID"] for r in graph.records("DM", cut=cut, site=site)])
+
+    for subject in subjects:
+        arm_rows = graph.records("DM", cut=cut, usubjid=subject)
+        arm = (arm_rows[0].get("ARM") or "").strip().upper() if arm_rows else None
+
+        for r in graph.records("EX", cut=cut, usubjid=subject):
+            extrt = _norm(graph.record_value(r, "EXTRT", cut))
+            dose = to_number(graph.record_value(r, "EXDOSE", cut))
+            visit = r.get("VISIT") or "this administration"
+
+            expected = {"DRUG": 10.0, "PLACEBO": 0.0}.get(extrt)
+            if expected is not None and dose is not None and dose != expected:
+                findings.append(Finding(
+                    code="DOSING_ERROR", usubjid=subject, site=graph.site_for(subject),
+                    severity="HIGH",
+                    rationale=(f"{visit}: administered dose is {dose:g} for EXTRT={extrt}, "
+                               f"but the protocol specifies {expected:g} "
+                               f"({'DRUG' if extrt == 'DRUG' else 'PLACEBO'} arm). "
+                               f"Protocol §8."),
+                    evidence=[Atlas.ref(r)],
+                    # Exact comparison against the protocol's own two allowed values.
+                    confidence=0.95,
+                    protocol_version=graph.protocol_version_at(record_cut := r["_cut"])))
+
+            if arm and extrt and extrt != arm:
+                findings.append(Finding(
+                    code="DOSING_ERROR", usubjid=subject, site=graph.site_for(subject),
+                    severity="CRITICAL",
+                    rationale=(f"{visit}: EXTRT={extrt} does not match the subject's "
+                               f"randomised arm (DM.ARM={arm}) — the wrong treatment may "
+                               f"have been dispensed."),
+                    evidence=[Atlas.ref(r), RecordRef(domain="DM", usubjid=subject)],
+                    confidence=0.9,
+                    protocol_version=graph.protocol_version_at(r["_cut"])))
+
+    findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
+    return findings
