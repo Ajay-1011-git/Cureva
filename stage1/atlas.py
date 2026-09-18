@@ -621,6 +621,41 @@ DEFAULT_HYS_ENZYME_MULTIPLE = 3.0
 DEFAULT_HYS_BILIRUBIN_MULTIPLE = 2.0
 DEFAULT_HYS_WINDOW_DAYS = 14
 
+#: protocol §4: "± 7 days from the scheduled day" (v1); the v2 amendment
+#: tightens it to ± 3. Read from the document, never assumed.
+DEFAULT_VISIT_WINDOW_DAYS = 7
+
+#: protocol §4: "Screening (Day −14), Baseline (Day 0), Weeks 2, 4, 8, 12, 16,
+#: 20, 24, End of Study (Day 182)." Day offsets are relative to Baseline = day 0.
+#: Confirmed against the data: the median observed offset equals the scheduled
+#: day for all ten visits across 240 subjects.
+DEFAULT_VISIT_SCHEDULE: dict[str, int] = {
+    "SCREENING": -14, "BASELINE": 0, "WEEK2": 14, "WEEK4": 28, "WEEK8": 56,
+    "WEEK12": 84, "WEEK16": 112, "WEEK20": 140, "WEEK24": 168, "EOS": 182,
+}
+
+#: How a protocol's prose names a visit, versus how the VISIT column spells it.
+_VISIT_ALIASES = {
+    "SCREENING": "SCREENING", "SCREEN": "SCREENING",
+    "BASELINE": "BASELINE", "RANDOMISATION": "BASELINE", "RANDOMIZATION": "BASELINE",
+    "ENDOFSTUDY": "EOS", "EOS": "EOS", "ENDOFTREATMENT": "EOS",
+}
+
+#: Both the ASCII hyphen and the Unicode minus sign U+2212 appear in the real
+#: documents ("Day −14" uses the latter), as do "±" and "+/-".
+_MINUS = "-\u2212\u2013\u2014"
+
+
+def _normalise_visit_name(name: str) -> str:
+    """A protocol's spelling of a visit, as the VISIT column writes it."""
+    key = re.sub(r"[^A-Z0-9]", "", (name or "").upper())
+    if key in _VISIT_ALIASES:
+        return _VISIT_ALIASES[key]
+    m = re.match(r"^WEEKS?(\d+)$", key)
+    if m:
+        return f"WEEK{int(m.group(1))}"
+    return key
+
 
 def protocol_section(text: str, number: int) -> str:
     """The body of one numbered section of a protocol markdown document.
@@ -672,6 +707,59 @@ class ProtocolRules:
         (self.hys_enzyme_multiple,
          self.hys_bilirubin_multiple,
          self.hys_window_days) = self._read_hys_thresholds()
+
+        self.visit_text = (protocol_section(self.text, 4)
+                           or _find_section_about(self.text, "visit", "schedule", "window"))
+        self.visit_window_days = self._read_visit_window()
+        self.visit_schedule = self._read_visit_schedule()
+
+    # ---------------------------------------------------------- visit windows
+    def _read_visit_window(self) -> int:
+        """± N days around a scheduled visit day, from the active protocol.
+
+        This is the value the v2 amendment moves (± 7 -> ± 3), so reading it
+        rather than assuming it is what makes a cut-scoped question give the
+        answer that was correct at that cut (PRD FR-17).
+        """
+        m = re.search(rf"(?:±|\+/[{_MINUS}]|\+\s*or\s*[{_MINUS}])\s*(\d+)\s*days?",
+                      self.visit_text, re.IGNORECASE)
+        if not m:
+            self.warnings.append(
+                f"{self.document_name}: no visit window found in the schedule section; "
+                f"using the documented default ±{DEFAULT_VISIT_WINDOW_DAYS} days")
+            return DEFAULT_VISIT_WINDOW_DAYS
+        return int(m.group(1))
+
+    def _read_visit_schedule(self) -> dict[str, int]:
+        """Visit name -> scheduled day offset from Baseline, from the protocol.
+
+        Two shapes are read out of the same sentence: visits given an explicit
+        day ("Screening (Day −14)", "End of Study (Day 182)") and the run of
+        weeks ("Weeks 2, 4, 8, 12, 16, 20, 24"), where week N is day 7N. The
+        documented schedule is used for anything the sentence does not cover.
+        """
+        schedule: dict[str, int] = {}
+        for name, day in re.findall(rf"([A-Za-z][A-Za-z ]*?)\s*\(\s*Day\s*([{_MINUS}]?\s*\d+)\s*\)",
+                                    self.visit_text):
+            visit = _normalise_visit_name(name)
+            digits = re.sub(rf"[^0-9{_MINUS}]", "", day)
+            negative = digits and digits[0] in _MINUS
+            value = int(re.sub(r"[^0-9]", "", digits) or 0)
+            if visit:
+                schedule[visit] = -value if negative else value
+
+        weeks = re.search(r"Weeks?\s+([\d,\s]*\d)", self.visit_text, re.IGNORECASE)
+        if weeks:
+            for n in re.findall(r"\d+", weeks.group(1)):
+                schedule[f"WEEK{int(n)}"] = int(n) * 7
+
+        missing = {k: v for k, v in DEFAULT_VISIT_SCHEDULE.items() if k not in schedule}
+        if missing:
+            self.warnings.append(
+                f"{self.document_name}: visit schedule did not yield {sorted(missing)}; "
+                f"using documented day offsets for those")
+            schedule.update(missing)
+        return schedule
 
     # -------------------------------------------------------------- Hy's law
     def _read_hys_thresholds(self) -> tuple[float, float, int]:
@@ -1375,4 +1463,82 @@ def detect_duplicate_subject(graph: "StudyGraph", site: str | None, usubjid: str
                 protocol_version=graph.protocol_version_at(cut),
             ))
     findings.sort(key=lambda f: (f.usubjid or ""))
+    return findings
+
+
+@detector("VISIT_OUT_OF_WINDOW")
+def detect_visit_out_of_window(graph: "StudyGraph", site: str | None, usubjid: str | None,
+                               cut: int | None) -> list[Finding]:
+    """A visit performed outside its protocol-defined window.
+
+    Protocol §4 gives a scheduled day per visit and a window around it. Both the
+    schedule and the window width are read from the version in force at the
+    question's cut — PRD FR-17 — which matters here more than anywhere else,
+    because the amendment narrows the window from ±7 to ±3 days. 205 real
+    visit-instances in the practice study fall in that gap: correct under v1,
+    deviations under v2/v3. The same record therefore gets different, and
+    equally correct, answers depending on the cut it is asked about.
+
+    Day 0 is the subject's own Baseline visit date, so the schedule is applied
+    per subject rather than against a study-wide calendar. A subject with no
+    Baseline visit falls back to DM.RFSTDTC; with neither, the subject cannot be
+    evaluated and is skipped rather than measured against a guess.
+
+    One finding per (subject, visit) rather than per record: six laboratory rows
+    drawn on the same out-of-window day are one deviation, not six.
+    """
+    rules = ProtocolRules(graph, cut)
+    findings: list[Finding] = []
+
+    subjects = ([usubjid] if usubjid else
+                [r["USUBJID"] for r in graph.records("DM", cut=cut, site=site)])
+
+    for subject in subjects:
+        visits = graph.visits_for(subject, cut)
+        if not visits:
+            continue
+        anchor = visits.get("BASELINE") or graph.reference_start_date(subject, cut)
+        if anchor is None:
+            continue                     # no day 0 to measure against; do not guess
+
+        for visit, actual in sorted(visits.items(), key=lambda kv: kv[1]):
+            scheduled_day = rules.visit_schedule.get(_normalise_visit_name(visit))
+            if scheduled_day is None:
+                continue                 # a visit the protocol does not schedule
+            actual_day = (actual - anchor).days
+            drift = actual_day - scheduled_day
+            if abs(drift) <= rules.visit_window_days:
+                continue
+
+            # Cite the records that carry this visit's date — the ones that
+            # actually show when it happened — one per domain, not all of them.
+            evidence: list[RecordRef] = []
+            for domain in VISIT_DOMAINS:
+                for r in graph.records(domain, cut=cut, usubjid=subject, visit=visit):
+                    if graph.record_date(r, cut) == actual:
+                        evidence.append(Atlas.ref(r))
+                        break
+            evidence.append(rules.evidence_ref(4))
+
+            direction = "late" if drift > 0 else "early"
+            over = abs(drift) - rules.visit_window_days
+            findings.append(Finding(
+                code="VISIT_OUT_OF_WINDOW",
+                usubjid=subject,
+                site=graph.site_for(subject),
+                severity="LOW",
+                rationale=(
+                    f"{visit} took place on {actual}, day {actual_day:+d} relative to the "
+                    f"subject's baseline on {anchor}, against a scheduled day "
+                    f"{scheduled_day:+d} — {abs(drift)} day(s) {direction}, which is "
+                    f"{over} day(s) outside the ±{rules.visit_window_days}-day window in "
+                    f"{rules.document_name} §4 (protocol v{rules.version})."),
+                evidence=evidence,
+                # Date arithmetic against a window read from the document. The
+                # one soft edge is a visit that misses by a single day, where a
+                # date transcription slip is as likely as a real deviation.
+                confidence=0.9 if over >= 2 else 0.68,
+                protocol_version=rules.version,
+            ))
+    findings.sort(key=lambda f: (f.usubjid or "", f.rationale))
     return findings
