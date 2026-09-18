@@ -184,7 +184,7 @@ OFFLINE_TESTS=(
   tests/test_t1_21_calibration.py     tests/test_t1_22_zero_pro.py
   tests/test_t1_24_sarvam_pool.py     tests/test_t1_26_groq_contract.py
   tests/test_t1_28_finding_graph.py   tests/test_t1_32_voice_path.py
-  tests/test_t1_33_clinical_intake.py
+  tests/test_t1_33_clinical_intake.py  tests/test_t1_34_plain_question.py
   # The review-cycle layer and Act 3. Offline: the arbitration and
   # rate-limit tests simulate their failure modes rather than firing real
   # calls, so `quick` runs them too.
@@ -227,6 +227,64 @@ probe() {
 }
 
 # ------------------------------------------------------------------ serve
+#
+# A previous run that was killed with SIGKILL, closed with the terminal, or
+# crashed leaves its server holding the port. The next `serve` then either
+# fails to bind or -- worse for a demo -- silently starts vite on 5174 while
+# the browser tab is still pointed at 5173, showing yesterday's build. So the
+# ports are cleared before anything starts, not only on the way out.
+free_port() {
+  local port="$1" label="$2" pids
+  pids="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null || true)"
+  [ -z "$pids" ] && return 0
+
+  amber "  port $port ($label) is in use by PID(s) $(echo $pids | tr '\n' ' ')— stopping"
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+
+  # Give it a moment to shut down cleanly before forcing it. A dev server
+  # usually goes on the first signal; anything still holding the port after
+  # ~1.5s is not going to.
+  local waited=0
+  while [ "$waited" -lt 5 ]; do
+    sleep 0.3
+    pids="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null || true)"
+    [ -z "$pids" ] && break
+    waited=$((waited + 1))
+  done
+
+  if [ -n "$pids" ]; then
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+    sleep 0.3
+  fi
+
+  if lsof -ti "tcp:$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    red "  could not free port $port — something else is holding it"
+    return 1
+  fi
+  green "  port $port freed"
+}
+
+free_ports() {
+  header "Clearing ports"
+  if ! command -v lsof >/dev/null 2>&1; then
+    # No lsof: fall back to killing this project's own servers by name. Less
+    # precise about the port, but it still clears what we started.
+    amber "  lsof not found — stopping our own servers by name instead"
+    pkill -f "uvicorn webapp.server" 2>/dev/null || true
+    pkill -f "node_modules/.bin/vite" 2>/dev/null || true
+    sleep 0.5
+    return 0
+  fi
+  free_port "$BACKEND_PORT"  "backend"
+  free_port "$FRONTEND_PORT" "frontend"
+  # Stale servers of ours on some *other* port (a previous run with
+  # BACKEND_PORT overridden) would still answer to their own name.
+  pkill -f "uvicorn webapp.server" 2>/dev/null || true
+  pkill -f "node_modules/.bin/vite" 2>/dev/null || true
+}
+
 start_backend() {
   header "Backend — http://localhost:$BACKEND_PORT"
   "$VENV/uvicorn" webapp.server:app --port "$BACKEND_PORT" &
@@ -234,9 +292,10 @@ start_backend() {
 }
 start_frontend() {
   header "Frontend — http://localhost:$FRONTEND_PORT"
-  # the vite binary directly, so $! is the real process (npm wraps a child
-  # that a kill on npm's own PID would leave running)
-  ( cd webapp/frontend && ./node_modules/.bin/vite --port "$FRONTEND_PORT" ) &
+  # --strictPort so a busy port is an error rather than a silent move to
+  # 5174. After free_ports() the port is ours; if it somehow is not, saying
+  # so beats serving the demo from an address nobody is looking at.
+  ( cd webapp/frontend && ./node_modules/.bin/vite --port "$FRONTEND_PORT" --strictPort ) &
   FRONTEND_PID=$!
 }
 cleanup_serve() {
@@ -293,10 +352,15 @@ case "$MODE" in
     [ $FAIL -eq 0 ]; exit $?
     ;;
 
-  backend)  start_backend;  trap cleanup_serve INT TERM; wait "$BACKEND_PID" ;;
-  frontend) start_frontend; trap cleanup_serve INT TERM; wait "$FRONTEND_PID" ;;
+  backend)  free_port "$BACKEND_PORT" backend
+            start_backend;  trap cleanup_serve INT TERM; wait "$BACKEND_PID" ;;
+  frontend) free_port "$FRONTEND_PORT" frontend
+            start_frontend; trap cleanup_serve INT TERM; wait "$FRONTEND_PID" ;;
+
+  ports)    free_ports; exit $? ;;
 
   serve)
+    free_ports
     start_backend; sleep 2; start_frontend
     echo
     green "  Backend   http://localhost:$BACKEND_PORT/api/health"
