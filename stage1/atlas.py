@@ -583,6 +583,29 @@ def _metric_discontinued_ae(atlas: "Atlas", question: Question,
     )
 
 
+# ========================================================= finding detectors
+# Signature: (graph, site, usubjid, cut) -> list[Finding]
+#
+# `cut` is part of the signature because several detectors are protocol-version
+# dependent (visit windows, exclusion criteria, prohibited conmeds) and the
+# version in force is a function of the cut — PRD FR-17 requires the rule that
+# applied then, not a fixed one.
+#
+# `site`/`usubjid` are passed so a detector can narrow its own scan for speed;
+# Atlas filters the results again afterwards, so a detector that ignores them
+# is still correct, just slower.
+
+DETECTORS: dict[str, Any] = {}
+
+
+def detector(code: str):
+    """Register a detector for one FindingCode."""
+    def register(fn):
+        DETECTORS[code] = fn
+        return fn
+    return register
+
+
 #: Hard ceiling per question (PRD FR-12/NFR-1). The harness scores a question
 #: that breaches it as zero regardless of correctness, so a slow-but-right
 #: answer is worth less than a fast partial one — hence the soft budget below.
@@ -626,7 +649,23 @@ class Atlas:
         }
 
     def _register_detectors(self) -> None:
-        """Populated in T1.9-T1.19."""
+        """One entry per FindingCode this system actually claims to detect.
+
+        A code that is absent is answered honestly ("this system does not claim
+        to detect it") rather than with a confident empty list. The distinction
+        matters: an empty list from a detector that ran means "nothing is
+        there", while an empty list from a code with no detector would mean
+        "we did not look" — reporting the second as the first would be a lie
+        that happens to score well on traps.
+
+        Codes deliberately not detected in Stage 1, per PRD §4.2:
+        SAE_UNESCALATED (escalation state is a Stage 2 concept, tracked across
+        ReviewCrew cycles) and LAB_UNIT_CORRUPTION / IMPLAUSIBLE_SITE_PATTERN /
+        LATE_DATA_ENTRY / DOCUMENT_TAMPERED (each is a trend across cuts,
+        meaningless from a single static build — Stage 3 owns cut-over-cut
+        comparison).
+        """
+        self.detectors = dict(DETECTORS)
 
     # --------------------------------------------------------------- helpers
     def cut_for(self, question: Question) -> int | None:
@@ -685,8 +724,11 @@ class Atlas:
                     question_id=question.id, answer=None, confidence=0.0,
                     text=f"unsupported question kind {question.kind!r}")
         except Exception as exc:                       # noqa: BLE001 - never raise
+            # The empty value matches the kind's answer type, so a caller (and
+            # the demo UI) never has to handle None where it expected a list.
+            empty: Any = [] if question.kind in ("lookup", "finding", "trap") else None
             result = Answer(
-                question_id=question.id, answer=None, confidence=0.0,
+                question_id=question.id, answer=empty, confidence=0.0,
                 text=f"could not answer: {type(exc).__name__}: {exc}")
 
         result.question_id = question.id
@@ -785,4 +827,72 @@ class Atlas:
         )
 
     def _answer_finding(self, question: Question, deadline: float) -> Answer:
-        raise NotImplementedError("T1.9")
+        """Run the detector named by params["code"] and report what it found.
+
+        Serves both "finding" and "trap" questions, identically. A trap is a
+        question whose true answer is empty; it is answered by the detector
+        honestly returning nothing, never by Atlas deciding a question looks
+        suspicious. There is no code here that could tell the difference, which
+        is the point — on the hidden set nothing labels a question as a trap.
+        """
+        params = dict(question.params or {})
+        code = params.get("code")
+        site = params.get("site")
+        usubjid = params.get("usubjid")
+        cut = self.cut_for(question)
+
+        detector = self.detectors.get(code)
+        if detector is None:
+            known = ", ".join(sorted(self.detectors)) or "none"
+            return Answer(
+                question_id=question.id, answer=[], confidence=0.0,
+                text=(f"no detector for finding code {code!r}; this system does not "
+                      f"claim to detect it. Detectors available: {known}."))
+
+        findings = detector(self.graph, site, usubjid, cut) or []
+
+        # Narrow to the requested scope. Done here rather than inside every
+        # detector so the filter is written once and cannot drift between them.
+        if site:
+            findings = [f for f in findings if f.site == site]
+        if usubjid:
+            findings = [f for f in findings if f.usubjid == usubjid]
+
+        subjects = sorted({f.usubjid for f in findings if f.usubjid})
+
+        evidence: list[RecordRef] = []
+        seen: set[tuple] = set()
+        for f in findings:
+            for ref in f.evidence:
+                key = (ref.domain, ref.usubjid, ref.seq, ref.document, ref.section)
+                if key not in seen:
+                    seen.add(key)
+                    evidence.append(ref)
+
+        scope = ""
+        if site:
+            scope += f" at site {site}"
+        if usubjid:
+            scope += f" for {usubjid}"
+
+        if not findings:
+            # Nothing found is a complete answer, returned exactly as it is.
+            # No second pass, no widened search, no guess. Confidence is high
+            # because the detector ran cleanly over the whole scope and the
+            # absence is a real result -- "nothing here" is not less certain
+            # than "something here".
+            return Answer(
+                question_id=question.id, answer=[], evidence=[], findings=[],
+                text=f"No {code} findings{scope} at cut {cut}.",
+                confidence=0.9)
+
+        return Answer(
+            question_id=question.id,
+            answer=subjects,
+            text=(f"{len(subjects)} subject(s){scope} with {code}: "
+                  + "; ".join(f.rationale for f in findings[:3])
+                  + (" ..." if len(findings) > 3 else "")),
+            findings=findings,
+            evidence=evidence,
+            confidence=round(sum(f.confidence for f in findings) / len(findings), 3),
+        )
