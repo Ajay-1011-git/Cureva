@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import gsap from 'gsap'
+import AskPanel from './AskPanel.jsx'
 
 /**
  * Shared nav bar + GSAP page-enter transition (T1.30). Infrastructure, not
@@ -21,20 +22,25 @@ export default function Layout() {
   }, [location.pathname])
 
   return (
-    <div className="app-shell">
-      <nav className="nav-bar">
-        <div className="nav-brand">Cureva <span className="nav-brand-sub">Study Sentinel</span></div>
-        {/* Atlas is the whole navigable product. Nothing unfinished is
-            advertised here; unknown paths redirect to /atlas (App.jsx). */}
-        <div className="nav-links">
-          <NavLink to="/atlas" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            Atlas
-          </NavLink>
-        </div>
-      </nav>
-      <main ref={mainRef} className="app-main">
-        <Outlet />
-      </main>
-    </div>
+    <>
+      <div className="app-shell">
+        <nav className="nav-bar">
+          <div className="nav-brand">Cureva <span className="nav-brand-sub">Study Sentinel</span></div>
+          {/* Atlas is the whole navigable product. Nothing unfinished is
+              advertised here; unknown paths redirect to /atlas (App.jsx). */}
+          <div className="nav-links">
+            <NavLink to="/atlas" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              Atlas
+            </NavLink>
+          </div>
+        </nav>
+        <main ref={mainRef} className="app-main">
+          <Outlet />
+        </main>
+      </div>
+      {/* Outside .app-shell on purpose: the panel blurs that element when it
+          opens, and a panel inside it would blur itself. */}
+      <AskPanel />
+    </>
   )
 }

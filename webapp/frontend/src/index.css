@@ -238,3 +238,79 @@ body { background: var(--bg); color: var(--text); }
 .fg-evidence { list-style: none; margin: 0; padding: 0; }
 .fg-evidence li { padding: 1px 0; }
 .fg-evidence code, .fg-detail-muted code { font-size: 0.72rem; color: var(--accent); }
+
+/* ---------------------------------------------------------------- ask panel
+   A floating question box, bottom-right. It lives OUTSIDE .app-shell so that
+   blurring the page behind it does not also blur the thing you are reading.
+   Width/height are animated by GSAP, not by a CSS transition, so the two
+   cannot fight over the same properties. */
+.ask-root { position: fixed; right: 24px; bottom: 24px; z-index: 50; }
+
+.ask-card {
+  width: 132px; height: 44px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 14px;
+  background: rgba(18, 24, 32, 0.96);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.ask-card.is-open {
+  border-color: var(--accent);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+}
+
+.ask-pill {
+  display: flex; align-items: center; gap: 8px;
+  height: 44px; padding: 0 14px;
+  font-size: 0.9rem; color: var(--muted); white-space: nowrap; cursor: pointer;
+}
+.ask-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(79, 195, 247, 0.6);
+  animation: ask-pulse 2.4s ease-out infinite;
+}
+@keyframes ask-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0.5); }
+  70%  { box-shadow: 0 0 0 9px rgba(79, 195, 247, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0); }
+}
+
+.ask-body { padding: 14px; max-height: 70vh; overflow-y: auto; }
+.ask-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 10px;
+}
+.ask-close {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 1.2rem; line-height: 1; padding: 0 2px;
+}
+.ask-close:hover { color: var(--text); }
+
+.ask-input {
+  width: 100%; padding: 10px 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-size: 0.92rem; font-family: inherit;
+}
+.ask-input:focus { outline: none; border-color: var(--accent); }
+
+.ask-examples { display: flex; flex-direction: column; gap: 5px; margin-top: 9px; }
+.ask-example {
+  text-align: left; background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 0.78rem; font-family: inherit;
+  padding: 3px 0; line-height: 1.35;
+}
+.ask-example:hover { color: var(--accent); }
+
+.ask-status { margin-top: 12px; color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
+.ask-error { color: var(--accent-warm); }
+
+.ask-answer { margin-top: 13px; border-top: 1px solid var(--border); padding-top: 11px; }
+.ask-value { font-size: 1.02rem; font-weight: 600; line-height: 1.45; word-break: break-word; }
+.ask-meta { margin-top: 5px; color: var(--muted); font-size: 0.76rem; }
+.ask-evidence {
+  margin: 9px 0 0; padding-left: 16px; color: var(--muted);
+  font-size: 0.76rem; line-height: 1.6; font-variant-numeric: tabular-nums;
+}
+.ask-more { list-style: none; margin-left: -16px; opacity: 0.7; }
+.ask-text { margin-top: 10px; color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
