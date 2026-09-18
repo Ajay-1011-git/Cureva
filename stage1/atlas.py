@@ -26,6 +26,17 @@ from study import SEQ_COL, Study, parse_date, standardise_lab, to_number
 PRO_DOMAIN = "PRO"
 ALL_DOMAINS: tuple[str, ...] = tuple(CSV_DOMAINS) + (PRO_DOMAIN,)
 
+#: The column carrying each domain's own event date. MH has none — a medical
+#: history entry is not dated in this schema — so it can never be windowed.
+DATE_COLUMN: dict[str, str | None] = {
+    "DM": "RFSTDTC", "AE": "AESTDTC", "LB": "LBDTC", "VS": "VSDTC",
+    "EX": "EXSTDTC", "CM": "CMSTDTC", "DS": "DSSTDTC", "MH": None,
+    "EG": "EGDTC", PRO_DOMAIN: "reported_date",
+}
+
+#: Domains that carry a VISIT column, and so can anchor a visit date.
+VISIT_DOMAINS: tuple[str, ...] = ("LB", "VS", "EX", "EG")
+
 #: Sequence column name per domain. DM has no sequence column — one row per
 #: subject — and PRO uses a plain "seq", written by intake/pro_writer.
 SEQ_COLUMN: dict[str, str | None] = dict(SEQ_COL) | {"DM": None, PRO_DOMAIN: "seq"}
@@ -314,6 +325,56 @@ class StudyGraph:
             return None
         return self.site_by_subject.get(usubjid) or site_of(usubjid)
 
+    # ------------------------------------------------------------------ dates
+    def record_date(self, record: dict, cut: int | None = "unset"):
+        """A record's own event date, corrected for the cut, or None.
+
+        Returns None both when the domain has no date column and when the value
+        will not parse — the caller cannot place the record in time either way,
+        and an unparsable date must not take the whole query down (PRD FR-11).
+        """
+        column = DATE_COLUMN.get(record["_domain"])
+        if not column:
+            return None
+        try:
+            return parse_date(self.record_value(record, column, cut))
+        except ValueError:
+            return None
+
+    def visit_date(self, usubjid: str, visit: str, cut: int | None = "unset"):
+        """The subject's actual date for a named visit.
+
+        Taken from whichever visit-carrying domain records it. On the practice
+        study all 2400 (subject, visit) pairs agree on their date across LB, VS,
+        EX and EG, so the choice is unambiguous there; the earliest is used so
+        that a hidden study whose domains disagree still resolves to one stable,
+        deterministic anchor rather than to whichever domain happened to be
+        scanned first.
+        """
+        target = _norm(visit)
+        earliest = None
+        for domain in VISIT_DOMAINS:
+            for r in self.records(domain, cut=cut, usubjid=usubjid):
+                if _norm(r.get("VISIT")) != target:
+                    continue
+                d = self.record_date(r, cut)
+                if d and (earliest is None or d < earliest):
+                    earliest = d
+        return earliest
+
+    def visits_for(self, usubjid: str, cut: int | None = "unset") -> dict[str, Any]:
+        """Every visit this subject has a date for, visit name -> date."""
+        out: dict[str, Any] = {}
+        for domain in VISIT_DOMAINS:
+            for r in self.records(domain, cut=cut, usubjid=usubjid):
+                visit = (r.get("VISIT") or "").strip()
+                if not visit:
+                    continue
+                d = self.record_date(r, cut)
+                if d and (visit not in out or d < out[visit]):
+                    out[visit] = d
+        return out
+
     # ------------------------------------------------------------------ build
     def build(self, cut: int | None = None) -> dict:
         """Snapshot the study at one cut and return the stats the grader reads.
@@ -585,6 +646,21 @@ class Atlas:
                          usubjid=record.get("USUBJID"),
                          seq=record.get("_seq"))
 
+    def record_id(self, record: dict, fallback_seq: int | None = None) -> str:
+        """The "DOMAIN:USUBJID:SEQ" string a lookup answer is written in.
+
+        The exact format is taken from the organiser's own published answers
+        (e.g. "LB:042-S07-001:31"). DM has no sequence column because it holds
+        exactly one row per subject; such a domain uses its 1-based position
+        within the subject's rows, which for DM is always 1. That is a
+        positional index, deliberately not a fabricated column value — inventing
+        a plausible-looking sequence number is the failure PRD FR-9 forbids.
+        """
+        seq = record.get("_seq")
+        if seq is None:
+            seq = fallback_seq
+        return f"{record['_domain']}:{record.get('USUBJID', '')}:{'' if seq is None else seq}"
+
     # -------------------------------------------------------------- dispatch
     def answer(self, question: Question) -> Answer:
         """Answer one question. Never raises.
@@ -633,7 +709,80 @@ class Atlas:
         return metric(self, question, params, deadline)
 
     def _answer_lookup(self, question: Question, deadline: float) -> Answer:
-        raise NotImplementedError("T1.8")
+        """Records in the requested domains within N days of a named visit.
+
+        params: {"usubjid", "domains": [...], "around_visit", "window_days"}
+        answer: ["DOMAIN:USUBJID:SEQ", ...] — strings, in the organiser's own
+        published format, not RecordRef objects. `evidence` still carries the
+        real RecordRefs.
+        """
+        params = dict(question.params or {})
+        cut = self.cut_for(question)
+        usubjid = params.get("usubjid")
+        visit = params.get("around_visit")
+        requested = params.get("domains") or []
+        if isinstance(requested, str):
+            requested = [requested]
+        domains = [d.upper() for d in requested] or list(ALL_DOMAINS)
+
+        window = params.get("window_days")
+        # No window given means "at the visit" — the records sharing its date —
+        # rather than a guessed span. Stated rather than silently defaulted.
+        window_days = int(window) if window is not None else 0
+
+        if not usubjid:
+            return Answer(question_id=question.id, answer=[], confidence=0.0,
+                          text="lookup needs a usubjid")
+
+        anchor = self.graph.visit_date(usubjid, visit, cut) if visit else None
+        if anchor is None:
+            known = self.graph.visits_for(usubjid, cut)
+            enrolled = bool(self.graph.records("DM", cut=cut, usubjid=usubjid))
+            if not enrolled:
+                text = f"no subject {usubjid} in the study at this cut."
+                confidence = 0.9
+            elif not known:
+                text = f"{usubjid} has no dated visit records at cut {cut}."
+                confidence = 0.85
+            else:
+                text = (f"{usubjid} has no visit named {visit!r} at cut {cut}; "
+                        f"visits on record: {', '.join(sorted(known))}.")
+                confidence = 0.8
+            # Nothing to anchor on is a real, complete answer of "no records",
+            # not a reason to guess at a nearby visit.
+            return Answer(question_id=question.id, answer=[], text=text,
+                          confidence=confidence)
+
+        hits: list[tuple[str, dict]] = []
+        undated = 0
+        for domain in domains:
+            rows = self.graph.records(domain, cut=cut, usubjid=usubjid)
+            for position, r in enumerate(rows, start=1):
+                d = self.graph.record_date(r, cut)
+                if d is None:
+                    undated += 1
+                    continue
+                if abs((d - anchor).days) <= window_days:
+                    hits.append((self.record_id(r, fallback_seq=position), r))
+
+        hits.sort(key=lambda t: (t[1]["_domain"], t[1].get("_seq") or 0))
+        ids = [i for i, _ in hits]
+
+        text = (f"{len(ids)} record(s) in {', '.join(domains)} within "
+                f"{window_days} day(s) of {usubjid}'s {visit} visit ({anchor}).")
+        if undated:
+            text += f" {undated} record(s) carried no usable date and could not be placed."
+
+        return Answer(
+            question_id=question.id,
+            answer=ids,
+            text=text,
+            evidence=[self.ref(r) for _, r in hits],
+            # The window is arithmetic on dates that all parsed cleanly. The
+            # only genuine uncertainty is records that could not be dated, so
+            # confidence drops only when some were skipped.
+            confidence=0.93 if not undated else 0.75,
+        )
 
     def _answer_finding(self, question: Question, deadline: float) -> Answer:
         raise NotImplementedError("T1.9")
