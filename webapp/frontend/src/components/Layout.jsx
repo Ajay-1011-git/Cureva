@@ -24,10 +24,8 @@ export default function Layout() {
     <div className="app-shell">
       <nav className="nav-bar">
         <div className="nav-brand">Cureva <span className="nav-brand-sub">Study Sentinel</span></div>
-        {/* Only Atlas is navigable while Stage 1 is the whole product. The
-            /monitor and /watch routes still resolve (so a deep link doesn't
-            404) but are not advertised until Stage 2/3 exist and have
-            something real behind them. */}
+        {/* Atlas is the whole navigable product. Nothing unfinished is
+            advertised here; unknown paths redirect to /atlas (App.jsx). */}
         <div className="nav-links">
           <NavLink to="/atlas" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Atlas
