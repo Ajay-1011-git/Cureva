@@ -119,8 +119,21 @@ class AvatarTurnHTTPResponse(BaseModel):
 # ------------------------------------------------------------------ routes
 @app.post("/api/atlas/ask", response_model=Answer)
 def ask(question: Question) -> Answer:
-    """Direct pass-through to Atlas.answer() — manual testing and demo scripting."""
-    return _atlas.answer(question)
+    """Direct pass-through to Atlas.answer() — manual testing and demo scripting.
+
+    Any findings a finding/trap-kind question turns up are also observed into
+    the session's FindingGraph (PRD §4.1: Act 2's graph is built from Atlas's
+    own findings output). Wrapped so a FindingGraph hiccup never breaks the
+    actual answer being returned — TRD §8's isolation rule applies to graph/
+    exactly as it does to intake/.
+    """
+    answer = _atlas.answer(question)
+    try:
+        if answer.findings:
+            _finding_graph.observe_all(answer.findings, cut=_graph.cut)
+    except Exception as exc:                          # noqa: BLE001
+        log.warning("finding-graph observe failed: %s", exc)
+    return answer
 
 
 @app.get("/api/atlas/patient360/{usubjid}")
@@ -217,6 +230,24 @@ def avatar_turn(req: AvatarTurnRequest) -> AvatarTurnHTTPResponse:
                                 transcript_ref=f"turn-{int(time.time()*1000)}",
                                 cut_available=_graph.cut or 1)
     pro_written = [f"PRO:{subject_id}:{r.seq}" for r in written]
+
+    # After a turn that names a real subject, re-check that subject against
+    # the detectors answerable from a single snapshot — this is what makes
+    # the demo's own causal narrative ("avatar hears something -> a graph
+    # node appears") concrete: it observes real Atlas.answer() findings for
+    # the subject the conversation is actually about, the same mechanism
+    # /api/atlas/ask uses. Never raises into this response.
+    if written and subject_id != "DEMO-SUBJECT":
+        for code in ("HYS_LAW_CANDIDATE", "AE_BEFORE_FIRST_DOSE", "PROHIBITED_CONMED",
+                     "VISIT_OUT_OF_WINDOW", "DOSING_ERROR"):
+            try:
+                q = Question(id=f"turn-scan-{code}", kind="finding", text="",
+                            params={"code": code, "usubjid": subject_id})
+                a = _atlas.answer(q)
+                if a.findings:
+                    _finding_graph.observe_all(a.findings, cut=_graph.cut)
+            except Exception as exc:                    # noqa: BLE001
+                log.warning("post-turn finding scan failed for %s: %s", code, exc)
 
     # -- 5. speak the reply
     reply_audio_b64 = None

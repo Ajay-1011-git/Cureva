@@ -46,3 +46,54 @@ body { background: var(--bg); color: var(--text); }
 .avatar-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.9rem; }
 .avatar-status-error { color: var(--danger); }
 .avatar-report { position: absolute; bottom: 8px; left: 10px; font-size: 0.72rem; color: var(--muted); background: rgba(0,0,0,0.4); padding: 2px 8px; border-radius: 6px; }
+
+/* ---------------------------------------------------------- Atlas page */
+.atlas-page h1 { margin-bottom: 4px; }
+.degraded-banner {
+  background: rgba(255, 183, 77, 0.12); border: 1px solid var(--accent-warm);
+  color: var(--accent-warm); padding: 10px 16px; border-radius: 10px;
+  font-size: 0.88rem; margin-bottom: 16px;
+}
+.atlas-split { display: grid; grid-template-columns: minmax(320px, 480px) 1fr; gap: 24px; align-items: start; }
+@media (max-width: 900px) { .atlas-split { grid-template-columns: 1fr; } }
+
+.atlas-avatar-col { display: flex; flex-direction: column; gap: 12px; }
+.chat-log { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel); font-size: 0.88rem; display: flex; flex-direction: column; gap: 6px; }
+.chat-msg { line-height: 1.4; }
+.chat-role { font-weight: 600; text-transform: capitalize; color: var(--muted); margin-right: 6px; }
+.chat-patient .chat-role { color: var(--accent); }
+.chat-avatar .chat-role { color: var(--accent-warm); }
+.chat-system .chat-role { color: var(--danger); }
+
+.chat-input-row { display: flex; gap: 8px; }
+.chat-input-row input {
+  flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); font-size: 0.9rem;
+}
+.chat-input-row button {
+  padding: 10px 18px; border-radius: 8px; border: none; background: var(--accent);
+  color: #06202b; font-weight: 600; cursor: pointer;
+}
+.chat-input-row button:disabled { opacity: 0.5; cursor: default; }
+
+.atlas-graph-col { min-height: 400px; }
+.finding-graph-panel { border: 1px solid var(--border); border-radius: 14px; padding: 18px; background: var(--panel); min-height: 400px; }
+.fg-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+.fg-header h2 { margin: 0; font-size: 1.05rem; }
+.fg-stats { color: var(--muted); font-size: 0.78rem; }
+.fg-empty { color: var(--muted); font-size: 0.9rem; padding: 40px 0; text-align: center; }
+.fg-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.fg-node {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  background: color-mix(in srgb, var(--accent) calc(var(--hub, 0) * 20%), var(--bg));
+}
+.fg-node-code { font-weight: 600; font-size: 0.78rem; color: var(--accent-warm); }
+.fg-node-subject { font-size: 0.85rem; margin-top: 2px; }
+.fg-node-cluster { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+.fg-edges { border-top: 1px solid var(--border); padding-top: 10px; font-size: 0.78rem; color: var(--muted); }
+.fg-edge-row { display: flex; gap: 6px; padding: 2px 0; }
+.fg-edge-rel { color: var(--accent); }
+.fg-edge-more { margin-top: 4px; font-style: italic; }
+
+.atlas-subject-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 18px; color: var(--muted); font-size: 0.85rem; }
+.atlas-subject-row input { padding: 5px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 0.85rem; width: 160px; }
