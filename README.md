@@ -17,22 +17,27 @@ python run_local_harness.py --module stage1.atlas --data hackathon-data --json s
 
 ### Running and testing everything
 
-`./run_stage1.sh` is the single entry point. From the repo root:
+`./run.sh` is the single entry point. From the repo root:
 
 ```bash
-./run_stage1.sh              # doctor + demo + harness + full suite (default)
-./run_stage1.sh doctor       # check the environment, change nothing
-./run_stage1.sh setup        # create .venv and install Python + frontend deps
-./run_stage1.sh demo         # run stage1/atlas.py's own entry point
-./run_stage1.sh harness      # score against the public question bank
-./run_stage1.sh test         # harness + every gating test
-./run_stage1.sh quick        # harness + offline tests only — no network, no keys
-./run_stage1.sh probe        # live Sarvam/Groq probes (report only, never gate)
-./run_stage1.sh serve        # backend :8000 + frontend :5173, Ctrl-C stops both
-./run_stage1.sh artifacts    # regenerate graph_stats.json + stage1_public.json
+./run.sh                 # doctor + demo + harness + full suite (default)
+./run.sh doctor          # check the environment, change nothing
+./run.sh setup           # create .venv and install Python + frontend deps
+./run.sh demo            # build the graph and answer a question end to end
+./run.sh ask "..."       # answer one plain-English question — no model, no key
+./run.sh harness         # score against the public question bank
+./run.sh cycle [cut]     # run one review cycle and print its report
+./run.sh test            # harness + every gating test
+./run.sh quick           # harness + offline tests only — no network, no keys
+./run.sh probe           # live Sarvam/Groq probes (report only, never gate)
+./run.sh serve           # backend :8000 + frontend :5173, Ctrl-C stops both
+./run.sh ports           # free :8000 and :5173, change nothing else
+./run.sh artifacts       # regenerate every submission artifact
 ```
 
-Start with `./run_stage1.sh doctor` if anything misbehaves — it names what's
+`run_stage1.sh` still works and forwards to `run.sh`.
+
+Start with `./run.sh doctor` if anything misbehaves — it names what's
 missing (venv, dependencies, data, `schemas.py`, credentials, `node_modules`,
 the avatar asset) instead of failing somewhere confusing later. Credentials are
 optional: the entire graded path and all 23 offline tests run with no `.env` at

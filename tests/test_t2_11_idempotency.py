@@ -99,6 +99,40 @@ try:
           [f.code for f in r["first"].deviations] == [f.code for f in r["second"].deviations])
 
     # ------------------------------------------------------------------
+    # The harder case: a repeat AFTER a multi-cut walk.
+    #
+    # The single-cut check above passed for weeks while memory was still
+    # mutating. Walking cuts 1..12 first lets the serious-AE watch fill, fire
+    # and clear; only then does repeating the last cut expose whether anything
+    # re-populates. It did -- the watch oscillated 0 -> 5 -> 0 -- and nothing
+    # here caught it, because a fresh crew at one cut never reaches that state.
+    # ------------------------------------------------------------------
+    print("\n=== a repeat after walking every cut ===\n")
+    walk_dir = os.path.join(work, "walk")
+    walk_graph = StudyGraph(DATA_DIR)
+    walk_crew = ReviewCrew(DATA_DIR, Atlas(walk_graph), state_dir=walk_dir)
+    for cut in range(1, 13):
+        walk_crew.run_cycle(cut=cut,
+                            protocol_version=walk_graph.protocol_version_at(cut))
+    walk_before = dict(walk_crew.memory.sizes())
+    walk_crew.run_cycle(cut=12, protocol_version=walk_graph.protocol_version_at(12))
+    walk_after = dict(walk_crew.memory.sizes())
+    walk_types = Counter(e.decision_type for e in walk_crew.trace.current_cycle)
+
+    print(f"memory after the walk : {walk_before}")
+    print(f"memory after a repeat : {walk_after}")
+    changed = {k: (walk_before[k], walk_after[k])
+               for k in walk_before if walk_before[k] != walk_after[k]}
+    print(f"changed               : {changed or 'nothing'}\n")
+
+    check("every memory counter is unchanged by a repeat after the full walk",
+          walk_before == walk_after, f"(changed: {changed})")
+    check("the repeat after the walk raises zero new queries",
+          walk_types.get("query_raised", 0) == 0)
+    check("the repeat after the walk raises zero new escalations",
+          walk_types.get("escalation_raised", 0) == 0)
+
+    # ------------------------------------------------------------------
     # The same check, with the dedup guards removed. It must fail.
     # ------------------------------------------------------------------
     print("\n=== the same check with the dedup guards switched off ===\n")

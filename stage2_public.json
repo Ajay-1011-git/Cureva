@@ -1,0 +1,428 @@
+{
+  "note": "No public cut list or expected-output schema was shipped for the review cycle, so this file's shape is a stated decision, not a spec being followed. It mirrors stage1_public.json, which is a score summary rather than a dump of raw output. The full ReviewReport for any cut is reproducible with ./run.sh cycle <n>; the unabridged trace for the designated public cycle is in stage2_public_trace.jsonl.",
+  "data_dir": "hackathon-data",
+  "cuts": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "public_cycle_cut": 9,
+  "walk_duration_ms": 2739,
+  "cycles": [
+    {
+      "cut": 1,
+      "protocol_version": 1,
+      "findings": 38,
+      "escalation_worthy": 6,
+      "watch_only": 32,
+      "escalations_total": 6,
+      "escalation_states": {
+        "APPROVED": 6
+      },
+      "queries": 37,
+      "deviations": 9,
+      "trace_lines": 111,
+      "tokens_used": 0,
+      "duration_ms": 60,
+      "findings_by_code": {
+        "MISSING_EXPOSURE_RECORD": 24,
+        "AE_BEFORE_FIRST_DOSE": 5,
+        "INCLUSION_VIOLATION": 4,
+        "PROHIBITED_CONMED": 2,
+        "DOSING_ERROR": 2,
+        "VISIT_OUT_OF_WINDOW": 1
+      }
+    },
+    {
+      "cut": 2,
+      "protocol_version": 1,
+      "findings": 50,
+      "escalation_worthy": 12,
+      "watch_only": 38,
+      "escalations_total": 12,
+      "escalation_states": {
+        "APPROVED": 12
+      },
+      "queries": 63,
+      "deviations": 23,
+      "trace_lines": 164,
+      "tokens_used": 0,
+      "duration_ms": 89,
+      "findings_by_code": {
+        "MISSING_EXPOSURE_RECORD": 20,
+        "VISIT_OUT_OF_WINDOW": 8,
+        "DOSING_ERROR": 8,
+        "AE_BEFORE_FIRST_DOSE": 7,
+        "INCLUSION_VIOLATION": 5,
+        "PROHIBITED_CONMED": 2
+      }
+    },
+    {
+      "cut": 3,
+      "protocol_version": 1,
+      "findings": 63,
+      "escalation_worthy": 18,
+      "watch_only": 45,
+      "escalations_total": 18,
+      "escalation_states": {
+        "APPROVED": 18
+      },
+      "queries": 84,
+      "deviations": 34,
+      "trace_lines": 214,
+      "tokens_used": 0,
+      "duration_ms": 109,
+      "findings_by_code": {
+        "MISSING_EXPOSURE_RECORD": 20,
+        "VISIT_OUT_OF_WINDOW": 15,
+        "DOSING_ERROR": 12,
+        "AE_BEFORE_FIRST_DOSE": 7,
+        "INCLUSION_VIOLATION": 5,
+        "PROHIBITED_CONMED": 2,
+        "SAE_UNESCALATED": 2
+      }
+    },
+    {
+      "cut": 4,
+      "protocol_version": 1,
+      "findings": 63,
+      "escalation_worthy": 27,
+      "watch_only": 36,
+      "escalations_total": 30,
+      "escalation_states": {
+        "APPROVED": 30
+      },
+      "queries": 120,
+      "deviations": 55,
+      "trace_lines": 268,
+      "tokens_used": 0,
+      "duration_ms": 135,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 27,
+        "DOSING_ERROR": 18,
+        "AE_BEFORE_FIRST_DOSE": 7,
+        "INCLUSION_VIOLATION": 5,
+        "PROHIBITED_CONMED": 5,
+        "MISSING_EXPOSURE_RECORD": 1
+      }
+    },
+    {
+      "cut": 5,
+      "protocol_version": 2,
+      "findings": 151,
+      "escalation_worthy": 79,
+      "watch_only": 72,
+      "escalations_total": 82,
+      "escalation_states": {
+        "APPROVED": 81,
+        "REJECTED": 1
+      },
+      "queries": 395,
+      "deviations": 142,
+      "trace_lines": 808,
+      "tokens_used": 0,
+      "duration_ms": 188,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 111,
+        "DOSING_ERROR": 18,
+        "AE_BEFORE_FIRST_DOSE": 7,
+        "INCLUSION_VIOLATION": 5,
+        "PROHIBITED_CONMED": 5,
+        "EXCLUSION_VIOLATION": 3,
+        "HYS_LAW_CANDIDATE": 1,
+        "SAE_UNESCALATED": 1
+      }
+    },
+    {
+      "cut": 6,
+      "protocol_version": 2,
+      "findings": 184,
+      "escalation_worthy": 110,
+      "watch_only": 74,
+      "escalations_total": 114,
+      "escalation_states": {
+        "APPROVED": 112,
+        "REJECTED": 2
+      },
+      "queries": 493,
+      "deviations": 170,
+      "trace_lines": 978,
+      "tokens_used": 0,
+      "duration_ms": 229,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 136,
+        "DOSING_ERROR": 18,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "PROHIBITED_CONMED": 7,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 2,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1
+      }
+    },
+    {
+      "cut": 7,
+      "protocol_version": 2,
+      "findings": 211,
+      "escalation_worthy": 134,
+      "watch_only": 77,
+      "escalations_total": 138,
+      "escalation_states": {
+        "APPROVED": 136,
+        "REJECTED": 2
+      },
+      "queries": 593,
+      "deviations": 196,
+      "trace_lines": 1147,
+      "tokens_used": 0,
+      "duration_ms": 255,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 161,
+        "DOSING_ERROR": 18,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "PROHIBITED_CONMED": 8,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 2,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1,
+        "SAE_UNESCALATED": 1
+      }
+    },
+    {
+      "cut": 8,
+      "protocol_version": 2,
+      "findings": 224,
+      "escalation_worthy": 148,
+      "watch_only": 76,
+      "escalations_total": 153,
+      "escalation_states": {
+        "APPROVED": 151,
+        "REJECTED": 2
+      },
+      "queries": 649,
+      "deviations": 210,
+      "trace_lines": 1235,
+      "tokens_used": 0,
+      "duration_ms": 265,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 175,
+        "DOSING_ERROR": 18,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "PROHIBITED_CONMED": 8,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 2,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1
+      }
+    },
+    {
+      "cut": 9,
+      "protocol_version": 3,
+      "findings": 252,
+      "escalation_worthy": 174,
+      "watch_only": 78,
+      "escalations_total": 179,
+      "escalation_states": {
+        "APPROVED": 177,
+        "REJECTED": 2
+      },
+      "queries": 753,
+      "deviations": 236,
+      "trace_lines": 1430,
+      "tokens_used": 0,
+      "duration_ms": 301,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 201,
+        "DOSING_ERROR": 18,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "PROHIBITED_CONMED": 8,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 3,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1,
+        "SAE_UNESCALATED": 1
+      }
+    },
+    {
+      "cut": 10,
+      "protocol_version": 3,
+      "findings": 271,
+      "escalation_worthy": 197,
+      "watch_only": 74,
+      "escalations_total": 203,
+      "escalation_states": {
+        "APPROVED": 201,
+        "REJECTED": 2
+      },
+      "queries": 829,
+      "deviations": 256,
+      "trace_lines": 1566,
+      "tokens_used": 0,
+      "duration_ms": 315,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 220,
+        "DOSING_ERROR": 18,
+        "PROHIBITED_CONMED": 9,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 3,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1
+      }
+    },
+    {
+      "cut": 11,
+      "protocol_version": 3,
+      "findings": 317,
+      "escalation_worthy": 243,
+      "watch_only": 74,
+      "escalations_total": 249,
+      "escalation_states": {
+        "APPROVED": 247,
+        "REJECTED": 2
+      },
+      "queries": 1013,
+      "deviations": 302,
+      "trace_lines": 1910,
+      "tokens_used": 0,
+      "duration_ms": 356,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 266,
+        "DOSING_ERROR": 18,
+        "PROHIBITED_CONMED": 9,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 3,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1
+      }
+    },
+    {
+      "cut": 12,
+      "protocol_version": 3,
+      "findings": 323,
+      "escalation_worthy": 253,
+      "watch_only": 70,
+      "escalations_total": 259,
+      "escalation_states": {
+        "APPROVED": 257,
+        "REJECTED": 2
+      },
+      "queries": 1037,
+      "deviations": 308,
+      "trace_lines": 1920,
+      "tokens_used": 0,
+      "duration_ms": 357,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 272,
+        "DOSING_ERROR": 18,
+        "PROHIBITED_CONMED": 9,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 3,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1
+      }
+    }
+  ],
+  "idempotency": {
+    "requirement": "running the same cut twice raises zero new queries and zero new escalations",
+    "repeated_cut": 12,
+    "memory_before": {
+      "queries_raised": 1037,
+      "escalations": 259,
+      "subject_flags": 175,
+      "site_flags": 12,
+      "sae_unescalated_watch": 0
+    },
+    "memory_after": {
+      "queries_raised": 1037,
+      "escalations": 259,
+      "subject_flags": 175,
+      "site_flags": 12,
+      "sae_unescalated_watch": 0
+    },
+    "memory_unchanged": true,
+    "new_queries_on_repeat": 0,
+    "new_escalations_on_repeat": 0,
+    "skipped_as_duplicate": {
+      "queries": 1012,
+      "escalations": 253
+    },
+    "holds": true
+  },
+  "public_cycle": {
+    "cut": 9,
+    "protocol_version": 3,
+    "counts": {
+      "cut": 9,
+      "protocol_version": 3,
+      "findings": 251,
+      "escalation_worthy": 170,
+      "watch_only": 81,
+      "escalations_total": 170,
+      "escalation_states": {
+        "APPROVED": 168,
+        "REJECTED": 2
+      },
+      "queries": 728,
+      "deviations": 236,
+      "trace_lines": 1572,
+      "tokens_used": 0,
+      "duration_ms": 308,
+      "findings_by_code": {
+        "VISIT_OUT_OF_WINDOW": 201,
+        "DOSING_ERROR": 18,
+        "AE_BEFORE_FIRST_DOSE": 8,
+        "PROHIBITED_CONMED": 8,
+        "INCLUSION_VIOLATION": 5,
+        "EXCLUSION_VIOLATION": 4,
+        "HYS_LAW_CANDIDATE": 3,
+        "DUPLICATE_SUBJECT": 2,
+        "SAE_MISCODED": 1,
+        "MISSING_EXPOSURE_RECORD": 1
+      }
+    },
+    "trace_file": "stage2_public_trace.jsonl",
+    "trace_lines": 1572,
+    "escalation_states": {
+      "APPROVED": 168,
+      "REJECTED": 2
+    },
+    "clarify_then_resubmitted": 3
+  },
+  "worked_escalation": {
+    "escalation_id": "ESC-2852380731cf",
+    "finding_id": "F-2852380731cf",
+    "code": "DOSING_ERROR",
+    "usubjid": "042-S09-006",
+    "site": "S09",
+    "summary": "WEEK2: administered dose is 10 for EXTRT=PLACEBO, but the protocol specifies 0 (PLACEBO arm). Protocol \u00a78.",
+    "clarify_count": 1,
+    "final_state": "APPROVED",
+    "reason": "resubmitted after CLARIFY (How many subjects at the site are affected and over which visits?) with clarification from the graph; per the monitor's stated protocol a resubmission is APPROVED"
+  }
+}

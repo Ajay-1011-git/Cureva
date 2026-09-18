@@ -351,6 +351,28 @@ class ReviewCrew:
             usubjid = record.get("USUBJID")
             seq = record.get("_seq")
             key = f"{usubjid}:{seq}"
+
+            # Already escalated under this code? Then it is an ordinary
+            # escalation now and this detector is done with it -- permanently.
+            #
+            # This check has to come BEFORE the watch is touched, not after.
+            # Checking afterwards let an escalated AE fall back into the watch
+            # (its entry having been removed when it escalated), so the watch
+            # oscillated 0 -> 5 -> 0 across cycles. No wrong escalation ever
+            # resulted, because the same check caught it again at the firing
+            # step, but memory was not stable, and "the same cut twice changes
+            # nothing" has to mean nothing.
+            #
+            # The fingerprint is (code, usubjid, site, evidence seqs) and does
+            # not include the rationale, so this probe has the same identity as
+            # the real finding without needing the first-seen cut to build it.
+            probe = Finding(code=SAE_UNESCALATED, usubjid=usubjid,
+                            site=self.graph.site_for(usubjid), rationale="",
+                            evidence=[Atlas.ref(record)])
+            if finding_id(probe) in already_escalated:
+                self.memory.sae_unescalated_watch.pop(key, None)
+                continue
+
             first_seen_cut = self.memory.sae_unescalated_watch.get(key)
 
             if first_seen_cut is None:
@@ -375,12 +397,8 @@ class ReviewCrew:
                 confidence=0.9,
                 protocol_version=ctx.protocol_version,
             )
-            if finding_id(candidate) in already_escalated:
-                # Already escalated under this code in an earlier cycle. Stop
-                # watching it -- its state is an ordinary escalation now.
-                self.memory.sae_unescalated_watch.pop(key, None)
-                continue
-
+            # No second already-escalated check here: the probe above has the
+            # same fingerprint and has already caught that case.
             ctx.findings.append(candidate)
             fired += 1
 
