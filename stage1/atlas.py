@@ -16,7 +16,7 @@ from bisect import bisect_right
 from pathlib import Path
 from typing import Any, Iterable
 
-from schemas import Answer, Question
+from schemas import Answer, Finding, Question, RecordRef
 from study import DOMAINS as CSV_DOMAINS
 from study import SEQ_COL, Study, parse_date, standardise_lab, to_number
 
@@ -473,6 +473,55 @@ class StudyGraph:
         return earliest
 
 
+def _norm(value: Any) -> str:
+    """Upper-cased, whitespace-collapsed text, for comparing coded values.
+
+    Coded columns are matched through this rather than by `==` on the raw
+    string: the practice study writes "DISCONTINUED" and "ADVERSE EVENT", but a
+    hidden study writing "Adverse Event" or a stray trailing space means the
+    same thing and must not silently stop matching. This normalises the
+    comparison, it does not invent synonyms.
+    """
+    return " ".join(str(value or "").split()).upper()
+
+
+# ============================================================ count metrics
+# Signature: (atlas, question, params, deadline) -> Answer
+# `params` is question.params minus the "metric" key.
+
+def _metric_discontinued_ae(atlas: "Atlas", question: Question,
+                            params: dict, deadline: float) -> Answer:
+    """How many subjects discontinued because of an adverse event.
+
+    Matches example_answer.py's own pattern: DS rows with DSDECOD DISCONTINUED
+    and DSTERM ADVERSE EVENT, optionally narrowed to one site. Evidence is every
+    DS record the count rests on — each one genuinely shows the discontinuation
+    it is cited for.
+    """
+    site = params.get("site")
+    usubjid = params.get("usubjid")
+    cut = atlas.cut_for(question)
+
+    hits = []
+    for r in atlas.graph.records("DS", cut=cut, site=site, usubjid=usubjid):
+        decod = _norm(atlas.graph.record_value(r, "DSDECOD", cut))
+        term = _norm(atlas.graph.record_value(r, "DSTERM", cut))
+        if decod == "DISCONTINUED" and term == "ADVERSE EVENT":
+            hits.append(r)
+
+    where = f" at site {site}" if site else ""
+    return Answer(
+        question_id=question.id,
+        answer=len(hits),
+        text=f"{len(hits)} subject(s){where} discontinued due to an adverse event.",
+        evidence=[Atlas.ref(r) for r in hits],
+        # An exact count over an exact predicate on complete records. Nothing is
+        # estimated, so this is as certain as the data itself. A zero is just as
+        # certain as a three -- "none here" is a real answer, not a shrug.
+        confidence=0.95,
+    )
+
+
 #: Hard ceiling per question (PRD FR-12/NFR-1). The harness scores a question
 #: that breaches it as zero regardless of correctness, so a slow-but-right
 #: answer is worth less than a fast partial one — hence the soft budget below.
@@ -505,10 +554,36 @@ class Atlas:
 
     # ------------------------------------------------------------ registries
     def _register_metrics(self) -> None:
-        """Populated in T1.7."""
+        """One entry per named count metric.
+
+        Adding a metric is one function plus one line here. The names are the
+        vocabulary question.params["metric"] is written in; an unrecognised name
+        is answered honestly rather than guessed at (see _answer_count).
+        """
+        self.metrics = {
+            "discontinued_ae": _metric_discontinued_ae,
+        }
 
     def _register_detectors(self) -> None:
         """Populated in T1.9-T1.19."""
+
+    # --------------------------------------------------------------- helpers
+    def cut_for(self, question: Question) -> int | None:
+        """The cut a question is asked at.
+
+        A question's own `cut` wins when it carries one; otherwise the cut the
+        graph was built at. This is what makes a cut-scoped question see the
+        protocol version, the visible records and the corrections that were
+        actually in force then.
+        """
+        return question.cut if question.cut is not None else self.graph.cut
+
+    @staticmethod
+    def ref(record: dict) -> RecordRef:
+        """A RecordRef pointing at exactly this record."""
+        return RecordRef(domain=record["_domain"],
+                         usubjid=record.get("USUBJID"),
+                         seq=record.get("_seq"))
 
     # -------------------------------------------------------------- dispatch
     def answer(self, question: Question) -> Answer:
