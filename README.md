@@ -15,6 +15,25 @@ Score against the public question bank (same rubric the hidden grader uses):
 python run_local_harness.py --module stage1.atlas --data hackathon-data --json stage1_public.json
 ```
 
+### Testing everything at once
+
+`./run_stage1.sh` runs the whole build in one command. From the repo root:
+
+```bash
+./run_stage1.sh            # harness + full test suite (default)
+./run_stage1.sh quick      # harness + graded-path tests only — no network,
+                           # no API keys needed, fast (T1.1-T1.22)
+./run_stage1.sh test       # + live Sarvam/Groq/backend tests (T1.24-T1.29,
+                           # needs a real .env)
+./run_stage1.sh harness    # just the grading harness
+./run_stage1.sh serve      # backend (:8000) + frontend (:5173) together,
+                           # for browsing http://localhost:5173/atlas by hand
+./run_stage1.sh backend    # backend only
+./run_stage1.sh frontend   # frontend only
+```
+
+Needs `.venv/` set up first (`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`) and, for `test`/`serve`, a working `.env` (see `.env.example`). See `DRIFT_NOTES.md` for anywhere this build diverged from the original planning documents, and what each `/atlas`, `/monitor`, `/watch` page actually does.
+
 ## How we understood the problem
 
 Nine CSVs that don't reference each other; a reviewer's real question always spans several of them, and getting a unit or a date format wrong doesn't look wrong — it just quietly produces a confident, incorrect answer. The hard part isn't joining tables, it's refusing to be confidently wrong: converting every lab value before comparing it to a threshold, treating "nothing found" as a real, citable answer rather than a fallback, and never letting a document's own words change what the code does. We scoped Act 1 (avatar) and Act 2 (finding graph) as strictly additive — the graded path must work identically with zero PRO records, so we built and regression-tested that isolation before touching either. Out of scope: anything that's a *trend across cuts* (`SAE_UNESCALATED`, `LAB_UNIT_CORRUPTION`, etc.) — meaningless from one static build, and explicitly Stage 2/3's job.
@@ -89,6 +108,18 @@ A detector returns `[]` exactly as-is when that's genuinely true — no "are you
 ## Graph
 
 `StudyGraph` itself is **not** a graph library — dict-of-lists indices keyed by `(domain, usubjid[, seq])`, per the organiser's own guidance that a real graph library's per-build cost isn't affordable at 27k-record scale. Act 2's finding graph (`graph/`, backend-only, observing `Atlas`'s own output) *is* built with networkx: nodes are `Finding`s deduplicated by `(code, usubjid)`, edges connect findings sharing a protocol section, a drug class, temporal proximity, or an amendment. Statistics are in `graph_stats.json`.
+
+## Pages
+
+Three routes exist (`webapp/frontend/src/App.jsx`); only `/atlas` has real content in Stage 1.
+
+**`/atlas`** (`src/pages/Atlas.jsx`) — the actual demo page, split into two halves:
+- *Left — the avatar.* `AvatarCanvas` (`src/avatar/`) renders the reused glTF rig in Three.js and idles by default. A **Subject** field picks which real USUBJID the conversation is "about" (defaults to `042-S07-001`, a real Hy's-law case, so the demo has something to find). Typing a message and hitting **Send** does the whole Act 1 chain: `POST /api/atlas/avatar-turn` → Groq extracts any symptom/medication mention → the extraction is written as a real `PRO` record on that subject → Sarvam speaks the reply → the avatar's gesture switches (idle/listening/concern_lean_in/explaining_gesture/reassure_nod/farewell_wave) and the chat log below the canvas shows both sides of the exchange. A **degraded-mode banner** appears above the split view whenever Sarvam or Groq falls back (revoked key, network failure, rate limit) — the page never pretends a degraded reply is a normal one.
+- *Right — the finding graph.* `FindingGraphPanel` (`src/components/FindingGraphPanel.jsx`) polls `GET /api/atlas/finding-graph` after every turn. It starts empty ("No findings yet…") and fills in as real `Finding` objects accumulate for the session — each box is one `FindingNode` (its code, its subject, which cluster it's in), animated in with a GSAP scale/fade when it's new. Underneath, up to 8 real edges are listed (`SHARED_PROTOCOL_SECTION` / `SAME_DRUG_CLASS` / `TEMPORAL_PROXIMITY`) showing which findings the graph thinks are related and why. This is fed by two things: any `POST /api/atlas/ask` call whose answer carries findings, and — after a successful avatar turn — a quick re-check of the conversation's subject against the detectors that only need one snapshot (`HYS_LAW_CANDIDATE`, `AE_BEFORE_FIRST_DOSE`, `PROHIBITED_CONMED`, `VISIT_OUT_OF_WINDOW`, `DOSING_ERROR`), so a real conversation about a real subject can make a real node appear without anyone manually asking a question first.
+
+**`/monitor`** and **`/watch`** — placeholder cards ("Stage 2" / "Stage 3", not built yet). They exist only so the nav bar and routing work end to end; nothing behind them is real until `stage2/crew.py` and `stage3/watch.py` exist. This repo's import rule (`stage2` imports `stage1`, `stage3` imports `stage2`, never the other direction) means neither placeholder imports anything from Stage 1's own code.
+
+The shared **nav bar** (`src/components/Layout.jsx`) is the same on every page and drives a small GSAP fade+slide whenever the route changes — infrastructure, not the showcase animation.
 
 ## What we know is weak
 

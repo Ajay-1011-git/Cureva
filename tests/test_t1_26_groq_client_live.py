@@ -18,9 +18,36 @@ except GroqUnavailable:
     print("SKIP: no Groq key configured — nothing to verify live.")
     sys.exit(0)
 
+
+def turn_with_retry(client, text, lang_hint=None, attempts=3, backoff=20):
+    """client.turn(), retrying past Groq's free-tier rate limit (30 req/min).
+
+    groq_client.turn() already degrades safely to a canned "Could you say
+    that again?" / gesture="idle" / extracted=[] response when Groq itself
+    is unreachable within its own two attempts (TRD §8) — that response is
+    schema-valid and is not a bug. But it's also not informative for THIS
+    test, whose job is to check what a live call actually extracts. If this
+    exact fallback signature comes back, it's the rate limit, not a real
+    Groq answer, so this retries after a longer cooldown rather than either
+    failing the run or silently treating a rate-limit artifact as a genuine
+    "the model chose to extract nothing" result.
+    """
+    RATE_LIMIT_SIGNATURE = ("Could you say that again?", "idle", [])
+    for attempt in range(attempts):
+        resp = client.turn(text, lang_hint=lang_hint)
+        signature = (resp.reply_text, resp.gesture, resp.extracted)
+        if signature != RATE_LIMIT_SIGNATURE:
+            return resp
+        if attempt < attempts - 1:
+            print(f"  (hit Groq's rate-limit fallback signature, retrying in {backoff}s...)")
+            import time as _t
+            _t.sleep(backoff)
+    return resp   # exhausted retries; return whatever the last attempt gave
+
+
 print("=== VERIFY (required): symptom + conmed mention, real call ===")
 utterance = "I've had a headache since yesterday and I'm also taking ibuprofen for it"
-resp = client.turn(utterance)
+resp = turn_with_retry(client, utterance)
 print(json.dumps(resp.model_dump(mode="json"), indent=2))
 
 check("returns a validated AvatarTurnResponse", isinstance(resp, AvatarTurnResponse))
@@ -62,7 +89,7 @@ cases = [
     ("Thank you so much for your help, goodbye.", {"farewell_wave"}),
 ]
 for text, acceptable in cases:
-    r = client.turn(text)
+    r = turn_with_retry(client, text)
     print(f"  {text[:50]!r:52} -> gesture={r.gesture!r}  (acceptable: {acceptable})")
     check(f"{text[:30]!r} produces a contextually acceptable gesture",
           r.gesture in acceptable, f"got {r.gesture!r}")
@@ -71,14 +98,14 @@ for text, acceptable in cases:
                        "reassure_nod", "farewell_wave"))
 
 print("\n=== VERIFY: no fabricated date from relative language (fixed during this task) ===")
-r2 = client.turn(utterance)
+r2 = turn_with_retry(client, utterance)
 dates = [e.reported_date for e in r2.extracted]
 print(f"  reported_date values for 'since yesterday': {dates}")
 check("no hallucinated absolute date inferred from relative language ('yesterday')",
       all(d is None for d in dates))
 
 print("\n=== VERIFY: an utterance with nothing to extract yields an empty list ===")
-r3 = client.turn("What time is my next appointment?")
+r3 = turn_with_retry(client, "What time is my next appointment?")
 print(f"  'What time is my next appointment?' -> extracted={r3.extracted}")
 check("no symptom/conmed -> empty extraction, nothing invented", r3.extracted == [])
 
