@@ -480,3 +480,13 @@ body { background: var(--bg); color: var(--text); }
 .hg-bulkresult.hg-error { color: var(--danger); }
 .hg-link-quiet { color: var(--muted); }
 .hg-link-quiet:hover { color: var(--accent); }
+
+/* the count chips double as the gate's filter */
+.hg-count { background: none; cursor: pointer; font-family: inherit; transition: all 0.2s ease; }
+.hg-count.on { background: rgba(79,195,247,0.12); border-color: var(--accent); color: var(--accent); }
+.hg-count.hg-pending.on { background: rgba(255,183,77,0.13); }
+.hg-count.hg-approved.on { background: rgba(102,187,106,0.13); }
+.hg-count.hg-rejected.on { background: rgba(239,83,80,0.13); }
+.hg-count:hover { color: var(--text); }
+.hg-empty .hg-btn { margin-top: 12px; }
+.hg-skipped { margin-top: 8px; font-size: 0.74rem; color: var(--accent-warm); line-height: 1.45; }

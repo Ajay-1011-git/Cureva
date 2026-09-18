@@ -13,7 +13,8 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
  * are what the server actually returned.
  */
 export default function HumanGate({ escalations, counts, onDecided, onSelectFinding,
-                                    onDebate, busy }) {
+                                    onDebate, busy, filter = 'PENDING', onFilter,
+                                    debating }) {
   const [pending, setPending] = useState({})   // escalation_id -> the decision in flight
   const [results, setResults] = useState({})   // escalation_id -> the record returned
   const [picked, setPicked] = useState(() => new Set())
@@ -81,14 +82,22 @@ export default function HumanGate({ escalations, counts, onDecided, onSelectFind
   if (busy) return <div className="hg-empty">running the cycle…</div>
 
   if (!escalations?.length) {
+    const decided = (counts?.APPROVED || 0) + (counts?.REJECTED || 0)
     return (
       <div className="hg-empty">
-        <strong>Nothing is waiting for a decision.</strong>
+        <strong>
+          {filter === 'PENDING' && decided
+            ? 'Nothing left to decide.'
+            : 'Nothing is waiting for a decision.'}
+        </strong>
         <p>
-          Run a cycle to raise escalations. If you have already run this cut, memory
-          is doing its job — an escalation answered once is never raised again.
-          Reset to restage the demo.
+          {filter === 'PENDING' && decided
+            ? `You have answered ${decided}. They are still here — switch the filter above to see them, or to argue one after the fact.`
+            : 'Run a cycle to raise escalations. If you have already run this cut, memory is doing its job — an escalation answered once is never raised again.'}
         </p>
+        {filter !== 'ALL' && (
+          <button className="hg-btn" onClick={() => onFilter?.('ALL')}>show all</button>
+        )}
       </div>
     )
   }
@@ -96,9 +105,17 @@ export default function HumanGate({ escalations, counts, onDecided, onSelectFind
   return (
     <div className="hg-list">
       <div className="hg-counts">
-        {Object.entries(counts || {}).map(([state, n]) => (
-          <span key={state} className={`hg-count hg-${state.toLowerCase()}`}>{state} {n}</span>
+        {['PENDING', 'APPROVED', 'REJECTED'].map((state) => (
+          <button key={state}
+                  className={`hg-count hg-${state.toLowerCase()} ${filter === state ? 'on' : ''}`}
+                  onClick={() => onFilter?.(state)}>
+            {state} {counts?.[state] ?? 0}
+          </button>
         ))}
+        <button className={`hg-count ${filter === 'ALL' ? 'on' : ''}`}
+                onClick={() => onFilter?.('ALL')}>
+          ALL {Object.values(counts || {}).reduce((a, b) => a + b, 0)}
+        </button>
       </div>
 
       <div className="hg-bulk">
@@ -158,8 +175,12 @@ export default function HumanGate({ escalations, counts, onDecided, onSelectFind
                   </button>
                 ) : (
                   <button className="hg-link hg-link-quiet"
-                          onClick={() => onDebate?.(e.finding_id)}>
-                    debate this
+                          disabled={!!debating}
+                          onClick={() => onDebate?.(e.finding_id)}
+                          title={e.tribunal_skip_reason || undefined}>
+                    {debating === e.finding_id
+                      ? 'arguing…'
+                      : e.tribunal_attempted ? 'try the debate again' : 'debate this'}
                   </button>
                 )}
               </div>
@@ -176,6 +197,12 @@ export default function HumanGate({ escalations, counts, onDecided, onSelectFind
               </div>
 
               {result?._error && <div className="hg-error">{result._error}</div>}
+
+              {!e.has_tribunal && e.tribunal_skip_reason && (
+                <div className="hg-skipped">
+                  last debate attempt: {e.tribunal_skip_reason}
+                </div>
+              )}
 
               {inFlight === 'CLARIFY' && (
                 <div className="hg-working">

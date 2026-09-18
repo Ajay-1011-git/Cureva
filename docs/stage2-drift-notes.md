@@ -273,6 +273,34 @@ two of its three attempts collecting 429s.
 Two consequences: `tribunal_budget` defaults to **1**, and a 429 is never
 retried — retrying spends the exact window the retry is waiting on.
 
+### 7.3 There are *two* ceilings, and the second one is the one that bites
+
+Correcting §7.2, which named only the per-minute limit. The free tier meters
+both:
+
+```
+tokens per minute (TPM): Limit   8,000
+tokens per day   (TPD): Limit 200,000
+```
+
+At ~7k tokens per deliberation that is **about 28 deliberations per day, in
+total, across every run** — development, rehearsal and the live demo share one
+budget. TPM is a delay of seconds; TPD is a wall until the rolling window
+clears, and it is silent until you hit it.
+
+This cost real time to find, because the skip reason said "tokens per minute"
+whatever had actually happened. Groq's own message names the ceiling, the usage
+and the retry interval; it is now passed through instead of summarised:
+
+```
+Groq rate limit: tokens per day (TPD) — used 199117 of 200000, retry in 5m18s
+```
+
+Completion length is also capped (`MAX_COMPLETION_TOKENS = 900`). Groq reserves
+against the bucket using the completion *allowance*, not the eventual response,
+so three uncapped parallel calls can reserve past the minute ceiling while the
+account genuinely has most of its tokens free.
+
 ## 8. Where the architecture could not survive the real data volume
 
 TNFR-1 asks that `run_cycle()` stay inside its time budget *"even when every

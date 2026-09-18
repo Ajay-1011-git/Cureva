@@ -20,17 +20,22 @@ export default function Monitor() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [debating, setDebating] = useState(null)
+  // Which slice of the gate is on screen. PENDING is the worklist and the
+  // right default, but a decided escalation must stay reachable — you often
+  // only want the argument *after* you have made the call, and filtering it
+  // off screen left no way back to it.
+  const [gateFilter, setGateFilter] = useState('PENDING')
 
-  const loadGate = useCallback(async () => {
+  const loadGate = useCallback(async (state = gateFilter) => {
     try {
-      const res = await fetch(`${API_BASE}/api/monitor/escalations?state=PENDING`)
+      const res = await fetch(`${API_BASE}/api/monitor/escalations?state=${state}`)
       setGate(await res.json())
     } catch (err) {
       setError(String(err.message || err))
     }
-  }, [])
+  }, [gateFilter])
 
-  useEffect(() => { loadGate() }, [loadGate])
+  useEffect(() => { loadGate(gateFilter) }, [loadGate, gateFilter])
 
   const runCycle = useCallback(async () => {
     setBusy(true); setError(null); setFindingId(null)
@@ -144,6 +149,7 @@ export default function Monitor() {
           <p className="mon-colsub">
             Every escalation waits here for a decision. Approve, reject, or ask for
             clarification — clarification is answered from the graph and resubmitted.
+            Decided ones stay reachable: switch the filter to argue one after the fact.
           </p>
           <HumanGate
             escalations={gate.escalations}
@@ -152,6 +158,9 @@ export default function Monitor() {
             onDecided={loadGate}
             onSelectFinding={setFindingId}
             onDebate={debate}
+            filter={gateFilter}
+            onFilter={setGateFilter}
+            debating={debating}
           />
         </section>
 

@@ -9,6 +9,7 @@
 #   ./run.sh ask "..."       answer one plain-English question, no model
 #   ./run.sh harness         score against the public question bank
 #   ./run.sh cycle [cut]     run one review cycle and print its report
+#   ./run.sh tokens          how much Act 3 budget is left today
 #   ./run.sh test            harness + the full gating test suite
 #   ./run.sh quick           harness + offline tests only (no network)
 #   ./run.sh probe           live Sarvam/Groq probes (report, never gate)
@@ -315,6 +316,71 @@ print(f"  {answer.text[:400]}")
 PYEOF
 }
 
+# ------------------------------------------------------------------ tokens
+token_budget() {
+  header "Act 3 token budget"
+  "$PY" - <<'PYEOF'
+import os
+from dotenv import load_dotenv
+load_dotenv(".env")
+
+key = os.environ.get("groq_api_key") or os.environ.get("GROQ_API_KEY")
+if not key:
+    print("  no Groq key configured — Act 3 cannot run at all.")
+    print("  Everything else, including the whole graded path, runs without one.")
+    raise SystemExit(0)
+
+import httpx
+
+try:
+    r = httpx.post("https://api.groq.com/openai/v1/chat/completions",
+                   headers={"Authorization": f"Bearer {key}"},
+                   json={"model": "openai/gpt-oss-120b",
+                         "messages": [{"role": "user", "content": "hi"}],
+                         "max_tokens": 1},
+                   timeout=20)
+except Exception as exc:
+    print(f"  could not reach Groq: {type(exc).__name__}: {exc}")
+    raise SystemExit(0)
+
+h = r.headers
+def show(label, remaining, limit, reset):
+    if remaining is None:
+        return
+    try:
+        left, total = int(remaining), int(limit)
+        pct = 100 * left / total if total else 0
+        mark = "ok  " if pct > 25 else "LOW " if pct > 5 else "GONE"
+        print(f"  {mark} {label:22} {left:>7} of {total:>7} left  ({pct:.0f}%)"
+              f"   resets in {reset}")
+    except (TypeError, ValueError):
+        pass
+
+print(f"  request status: {r.status_code}")
+show("tokens per minute", h.get("x-ratelimit-remaining-tokens"),
+     h.get("x-ratelimit-limit-tokens"), h.get("x-ratelimit-reset-tokens"))
+show("requests per day", h.get("x-ratelimit-remaining-requests"),
+     h.get("x-ratelimit-limit-requests"), h.get("x-ratelimit-reset-requests"))
+
+if r.status_code == 429:
+    print()
+    print("  RATE LIMITED RIGHT NOW:")
+    print("  " + r.text[:300])
+
+print()
+print("  One deliberation costs roughly 7,200 tokens across 6 calls.")
+print()
+print("  The ceiling that actually ends a demo is tokens per DAY: 200,000, or")
+print("  about 28 deliberations, shared by development, rehearsal and the live")
+print("  run. Groq does not report daily tokens in any header — only the two")
+print("  figures above — so this check CANNOT tell you how much of the day is")
+print("  left. You find out by hitting it.")
+print()
+print("  If a debate fails with 'tokens per day', it will not recover for hours.")
+print("  Rehearse it once, not repeatedly.")
+PYEOF
+}
+
 # ------------------------------------------------------------------ serve
 #
 # A previous run that was killed with SIGKILL, closed with the terminal, or
@@ -473,6 +539,7 @@ case "$MODE" in
 
   ports)    free_ports; exit $? ;;
   cycle)    review_cycle "${2:-9}"; exit $? ;;
+  tokens)   token_budget; exit $? ;;
   ask)      shift; ask_question "$@"; exit $? ;;
 
   serve)

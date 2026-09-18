@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,6 +26,17 @@ from tribunal.client import (ask_json, citable_block, context_block,
 from tribunal.models import PERSONAS, Persona, PersonaVerdict
 
 log = logging.getLogger("cureva.tribunal.round1")
+
+
+def _limit_detail(exc: BaseException) -> str:
+    """The useful half of Groq's 429: which ceiling, and how long."""
+    text = str(exc)
+    match = re.search(r"on (tokens per \w+ \([A-Z]+\)): Limit (\d+), Used (\d+)", text)
+    retry = re.search(r"try again in ([\dhms.]+)", text)
+    if match:
+        detail = f"{match.group(1)} — used {match.group(3)} of {match.group(2)}"
+        return detail + (f", retry in {retry.group(1)}" if retry else "")
+    return text[:160]
 
 # Each persona is given a different question to be accountable for, which is
 # what makes genuine disagreement possible. They are not three temperatures of
@@ -165,8 +177,14 @@ async def _one_persona(client: Any, persona: Persona, finding: Any,
         except Exception as exc:                                  # noqa: BLE001
             if is_rate_limit(exc):
                 # Retrying now would spend the very window we are waiting on.
-                log.warning("round 1 %s rate-limited", persona)
-                return None, tokens, "Groq rate limit (tokens per minute) reached"
+                #
+                # Pass Groq's own message through rather than summarising it.
+                # There are two separate ceilings -- tokens per minute and
+                # tokens per day -- and only the message says which one was
+                # hit and how long it lasts. Hardcoding "per minute" here sent
+                # us chasing the wrong limit for an afternoon.
+                log.warning("round 1 %s rate-limited: %s", persona, exc)
+                return None, tokens, f"Groq rate limit: {_limit_detail(exc)}"
             reason = f"{type(exc).__name__}: {str(exc)[:120]}"
             log.warning("round 1 %s call failed: %s", persona, reason)
             continue

@@ -25,10 +25,19 @@ depends on.
 
 Two things to check before an audience sees it:
 
-- **Warm the debate.** The free tier throttles on *tokens per minute*, and one
-  deliberation costs ~7.2k against an 8000 ceiling. Run one debate privately
-  before you start so you know the window is clear, then leave ~a minute before
-  the live one.
+- **Check the daily budget before you rehearse.** This is the one that will
+  ruin the demo, and it is silent until it bites. The free tier meters two
+  ceilings: **8,000 tokens per minute** and **200,000 tokens per day**. One
+  deliberation costs ~7.2k, so the day's budget is **about 28 debates total** —
+  and rehearsal, development and the live run all share it.
+
+  ```bash
+  ./run.sh tokens      # what is left today, before you spend it
+  ```
+
+  Rehearse the debate **once**, not repeatedly. If the day's budget is gone,
+  the debate will not run no matter how long you wait, and Act 6 has to be
+  narrated instead of shown. Plan for a fresh day, or upgrade the tier.
 - **Have a second terminal** open at the repo root for the closing run.
 
 The **Reset** button is still there for restaging mid-demo — you have answered
@@ -231,7 +240,8 @@ identical escalation-worthy set: True (108 vs 108)
 | Symptom | Cause | Do this |
 |---|---|---|
 | Gate is empty after Run cycle | You already answered these in this session | Press **Reset** (or restart `serve`) |
-| Debate says "timed out" or "rate limit" | Tokens-per-minute ceiling; one deliberation ≈ 7.2k of 8000 | Wait a minute. Say so out loud — it is the designed degradation and Act 7 is about exactly this |
+| Debate says "rate limit … (TPM)" | Per-minute ceiling — a short wait | Wait ~a minute, press **try the debate again** |
+| Debate says "rate limit … (TPD)" | The day's 200k budget is gone | It will not recover today. Narrate Act 6 from the script and lean on Act 7 — the degradation is the point |
 | Debate panel says no deliberation ran | That finding was never deliberated | Use **debate this** on the row |
 | Page will not load | Frontend deps missing | `./run.sh setup`, then `./run.sh serve` |
 | Port already in use | An old server survived | `./run.sh ports` |

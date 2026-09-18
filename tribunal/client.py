@@ -52,9 +52,22 @@ def make_client(api_key: str | None = None) -> Any:
     return AsyncGroq(api_key=api_key or load_key())
 
 
+#: A persona's answer is a small JSON object — a verdict, a few sentences, a
+#: handful of record refs. Capping the completion is not about saving money.
+#:
+#: Groq's free tier meters *tokens per minute*, and it reserves against that
+#: bucket per request using the completion allowance, not what the response
+#: turns out to cost. With no cap, three parallel Round-1 calls each reserve a
+#: large default, the three reservations together exceed the 8000 ceiling, and
+#: the round fails with a rate-limit error while the account genuinely has
+#: ~7900 tokens free. Measured: a real persona reply costs about 1.2k.
+MAX_COMPLETION_TOKENS = 900
+
+
 async def ask_json(client: Any, system: str, user: str, *,
                    temperature: float = 0.3,
-                   reasoning_effort: str = "low") -> tuple[str, int]:
+                   reasoning_effort: str = "low",
+                   max_completion_tokens: int = MAX_COMPLETION_TOKENS) -> tuple[str, int]:
     """One JSON-mode completion. Returns (content, tokens_used).
 
     Raises on transport failure; the caller decides what a failure means. This
@@ -69,6 +82,7 @@ async def ask_json(client: Any, system: str, user: str, *,
         reasoning_effort=reasoning_effort,
         reasoning_format="hidden",
         temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
     )
     content = (completion.choices[0].message.content or "").strip()
     tokens = getattr(getattr(completion, "usage", None), "total_tokens", 0) or 0

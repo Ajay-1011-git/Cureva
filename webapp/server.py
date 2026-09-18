@@ -492,7 +492,15 @@ def _escalation_payload(record, crew) -> dict:
         "send_failed": record.send_failed,
         "severity": finding.severity if finding else None,
         "evidence": [e.model_dump() for e in finding.evidence] if finding else [],
-        "has_tribunal": record.finding_id in crew.transcripts,
+        # True only when a deliberation actually happened. A failed attempt is
+        # still stored (its reason is worth keeping) but must not make the row
+        # offer "see the debate" when there is no debate to see — the row
+        # should go on offering to try again.
+        "has_tribunal": bool(getattr(crew.transcripts.get(record.finding_id),
+                                     "ran", False)),
+        "tribunal_attempted": record.finding_id in crew.transcripts,
+        "tribunal_skip_reason": getattr(crew.transcripts.get(record.finding_id),
+                                        "skip_reason", None),
     }
 
 
