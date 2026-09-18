@@ -257,3 +257,130 @@ silence-guard.
 Also: **`/monitor` and `/watch` are no longer in the nav.** The routes still
 resolve so a deep link doesn't 404, but they are not advertised while Stage 1
 is the whole product.
+
+## 9. Act 1 / Act 2 built out beyond what the documents specify
+
+The four commits after §8 took the demo layer well past the letter of the
+PRD/TRD. None of it touches the graded path — `stage1/atlas.py` and `study.py`
+are unchanged throughout, the harness stays at 100.0/100, and the zero-PRO
+isolation test (T1.22) still diffs empty. But a future session should know
+these are additions, not things the documents asked for.
+
+### Act 2's graph is seeded from the whole study, not empty
+
+PRD §4.1 and T1.28 describe the finding graph as built "from `Atlas.answer()`'s
+own findings output" during a Page 1 session — i.e. starting empty and filling
+as questions are asked. It now runs all eleven detectors at backend startup and
+opens with the real picture: **189 findings, 50 relationships, 172 clusters**.
+
+The empty-box version was literally faithful and useless: `/atlas` opened
+saying nothing about the study, and the "watch a finding appear" moment had no
+"before" to contrast against. Seeding gives the demo its actual shape — here is
+what the data already says, now watch a patient add to it.
+
+### `PATIENT_REPORTED` is a node code that is NOT a `schemas.FindingCode`
+
+TRD §6 types `FindingNode.code` as "one of `schemas.FindingCode`". Patient-
+reported data now gets nodes carrying `code="PATIENT_REPORTED"`, which is
+deliberately **not** in that enum (verified: it is absent from
+`FindingCode.__args__`).
+
+This is a considered break, not an oversight. Labelling a person's own words
+with a detector's finding code would blur the single distinction that matters
+most in this system — what a rule concluded versus what a patient said.
+`schemas.py` is untouched and the graded path never sees these nodes;
+`FindingNode` is Cureva's own model in `graph/models.py`, so widening what its
+`code` field carries costs nothing downstream.
+
+Related: one node **per subject**, not per utterance. The first version created
+a node per sentence, which grew a constellation of disconnected dots beside the
+person. Reports now fold into that subject's single node, accumulating each
+term with its verbatim quote.
+
+### Escalation is deterministic, which no document asked for
+
+`intake/red_flags.py` screens every turn for reportable symptoms (chest pain,
+breathlessness, jaundice, syncope, bleeding, hospitalisation, and so on) with
+a keyword and proximity match, independent of the model.
+
+The prompt does instruct the model to escalate, and it usually does — but the
+same chest-pain sentence was observed escalating on one call and coming back as
+an ordinary follow-up on the next. "Usually" is the wrong reliability for the
+one behaviour where a miss matters, so the model's reply is treated as bedside
+manner and this is the safety net. Either firing raises the flag.
+
+Jaundice is matched by **proximity** (a body part near a colour word) rather
+than an enumerated phrase list, because the list missed "eyes have been looking
+a bit yellow".
+
+### The avatar's turn now carries the patient's chart
+
+TRD §5's `POST /api/atlas/avatar-turn` contract takes `audio_b64`/`text`/
+`lang_hint` and nothing about the subject's clinical context.
+`intake/patient_context.py` now builds a briefing per subject — arm, current
+conmeds, prior AEs, every lab outside its reference range (through
+`standardise_lab`, so a local-lab ALT reads as the converted 239.7 U/L, not the
+raw 3.995) and findings already standing against them — and passes it in the
+**system** message, never the user message. Mixing the two is how a model ends
+up "extracting" a symptom out of the briefing that the patient never said.
+
+### Endpoints and response fields beyond TRD §5
+
+| Beyond spec | Why |
+|---|---|
+| `GET /api/atlas/subjects` (6th route) | The subject picker needs the real enrolled list with site/arm/demographics/finding counts. A free-text id field silently accepted typos as "a subject with no records" |
+| `transcript` on the turn response | A spoken turn has to show what was actually heard. A mis-transcription is the most confusing failure in a voice interface and hiding it makes a live demo undebuggable |
+| `red_flags` on the turn response | So the page can show what was escalated and why |
+| `degraded` on the turn response | TRD §8/TNFR-5 requires a degraded state to never look identical to a working one, but §5's literal shape has no field to carry it |
+| `GET /api/health` | Confirms the server is up and which external services are configured, without spending an avatar turn |
+
+### The graph panel is 3D
+
+T1.32 asks for a finding-graph panel that animates new nodes in with GSAP. It
+is now a three.js scene — orbit, zoom, raycast hover, click-to-inspect — with a
+detail panel showing the code, subject, source domains, every cited record, the
+protocol section a rule came from, and for a patient node every term with its
+quote.
+
+Layout is a **deterministic** cluster spiral, not a force simulation: a force
+sim costs frames to converge at ~190 nodes and lands somewhere different every
+reload, which makes it useless for narrating a demo twice. Unconnected findings
+are packed into a thin outer shell rather than spread through the volume —
+scattering ~150 unrelated dots evenly reads as a pattern that is not there.
+
+### Avatar: relaxed stance and an attentive lean
+
+Extending §4. Two things about this rig that guessing gets backwards, found by
+rendering candidates and looking at them:
+- **Z is the twist axis** for the arm bones — rotating it alone leaves the arm
+  sticking straight out and just rolls the hand over.
+- **X is the swing axis**, but a large X rotation *alone* collapses the sleeve
+  into the shoulder; the skin weights do not carry it. At 74° the jacket
+  crumpled into a cap sleeve and the hands read as detached.
+
+X ≈ 40° with Z ≈ −35° produces a natural drape. The rig's rest pose is a
+T-pose, so `idle: {}` meant the T-pose *was* the idle pose — every gesture is
+now an offset from a `RELAXED_BASE` stance instead.
+
+She also leans in after the first prompt and holds it for the conversation
+(`ENGAGED_LEAN`), resetting on a subject change.
+
+Two implementation traps worth recording:
+- **Positional offsets must be fractions of a bone's own rest length.** An
+  absolute 0.9 against a chest bone 0.094 long was ten times its length and
+  threw the figure out of the camera frustum — those frames rendered an empty
+  box.
+- **The gesture layer must keep its own quaternion.** It originally slerped
+  *from* `bone.quaternion`, but idle and co-speech rotations are multiplied on
+  afterwards, so it was interpolating from its own output plus a frame of
+  someone else's. A gesture change resets the blend, and from that polluted
+  orientation it landed as a visible lurch.
+
+### Sarvam TTS only accepts its own locale list
+
+Extending §3. `bulbul:v3` rejects any `target_language_code` outside a fixed
+set of `-IN` locales with HTTP 400, and Groq returns `en-US` in practice
+despite the prompt asking for BCP-47. Every reply was silently failing to be
+spoken and showing the degraded banner. The language is now coerced at the
+Sarvam boundary (`supported_language`), re-homing a base language to its `-IN`
+locale and falling back to `en-IN`.
