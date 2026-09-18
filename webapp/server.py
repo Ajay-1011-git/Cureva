@@ -395,3 +395,181 @@ def health() -> dict:
         "sarvam_configured": _get_sarvam() is not None,
         "groq_configured": _get_groq() is not None,
     }
+
+
+# ==========================================================================
+# The review cycle — T2.18. Four routes, per TRD §5.
+# ==========================================================================
+#
+# One ReviewCrew per process, built lazily. Lazy because constructing it parses
+# the organiser's response files, and the server must still start and serve
+# /api/atlas/* on a machine where those are missing.
+#
+# It runs in "defer" mode: escalations are raised and held PENDING for a person
+# to answer on the review page. That is the only way PENDING is reachable at
+# all — study.escalate() always replies inline — and it is what makes the human
+# gate a gate rather than a read-only list. The graded path is unaffected; it
+# constructs its own crew with the default "auto" mode.
+_crew = None
+_crew_error: str | None = None
+
+
+def _get_crew():
+    global _crew, _crew_error
+    if _crew is None and _crew_error is None:
+        try:
+            from stage2 import ReviewCrew
+            _crew = ReviewCrew(DATA_DIR, _atlas, tribunal=True, tribunal_budget=1,
+                               human_gate="defer")
+        except Exception as exc:                      # noqa: BLE001
+            _crew_error = f"{type(exc).__name__}: {exc}"
+            log.error("review crew unavailable: %s", _crew_error)
+    return _crew
+
+
+class RunCycleRequest(BaseModel):
+    cut: int
+    protocol_version: int
+
+
+class DecisionRequest(BaseModel):
+    decision: str
+
+
+def _crew_or_503():
+    crew = _get_crew()
+    if crew is None:
+        raise HTTPException(status_code=503,
+                            detail=f"review cycle unavailable: {_crew_error}")
+    return crew
+
+
+def _escalation_payload(record, crew) -> dict:
+    """An escalation plus the finding evidence a person needs to judge it."""
+    finding = next((v.finding for v in crew.last_verdicts
+                    if v.finding_id == record.finding_id), None)
+    return {
+        "escalation_id": record.escalation_id,
+        "finding_id": record.finding_id,
+        "code": record.code,
+        "usubjid": record.usubjid,
+        "site": record.site,
+        "summary": record.summary,
+        "state": record.state,
+        "decision": record.decision,
+        "reason": record.reason,
+        "raised_cycle": record.raised_cycle,
+        "raised_cut": record.raised_cut,
+        "resolved_cycle": record.resolved_cycle,
+        "clarify_count": record.clarify_count,
+        "send_failed": record.send_failed,
+        "severity": finding.severity if finding else None,
+        "evidence": [e.model_dump() for e in finding.evidence] if finding else [],
+        "has_tribunal": record.finding_id in crew.transcripts,
+    }
+
+
+@app.post("/api/monitor/run-cycle")
+def run_cycle(req: RunCycleRequest) -> dict:
+    """Run one review cycle and return the real ReviewReport."""
+    crew = _crew_or_503()
+    report = crew.run_cycle(cut=req.cut, protocol_version=req.protocol_version)
+    # The report is returned as-is; the verdict split rides alongside it,
+    # because ReviewReport has nowhere to carry escalation-worthy vs
+    # watch-only and the page needs to show that distinction.
+    return {
+        "report": report.model_dump(mode="json"),
+        "verdicts": [
+            {"finding_id": v.finding_id, "code": v.finding.code,
+             "usubjid": v.finding.usubjid, "site": v.finding.site,
+             "severity": v.finding.severity, "escalate": v.escalate,
+             "rule": v.rule, "tribunal_ran": v.tribunal_ran}
+            for v in crew.last_verdicts
+        ],
+        "memory": crew.memory.sizes(),
+        "cycle": crew.memory.cycle_number,
+    }
+
+
+@app.get("/api/monitor/tribunal/{finding_id}")
+def tribunal_transcript(finding_id: str) -> dict:
+    """That finding's full three-round transcript.
+
+    A finding the Tribunal never ran on gets an explicit `ran: false` with a
+    reason — never a bare 404, which reads as a broken page rather than as the
+    honest answer that no deliberation took place.
+    """
+    crew = _crew_or_503()
+    transcript = crew.transcripts.get(finding_id)
+    if transcript is None:
+        return {"finding_id": finding_id, "ran": False,
+                "skip_reason": ("no deliberation was run for this finding — it was "
+                                "either watch-only, or outside this cycle's budget"),
+                "round1": [], "round2": [], "round3": None}
+    return transcript.model_dump(mode="json")
+
+
+@app.get("/api/monitor/escalations")
+def escalations(state: str | None = "PENDING") -> dict:
+    """Current escalations. Defaults to PENDING — the human gate's worklist."""
+    crew = _crew_or_503()
+    wanted = None if (state or "").upper() in ("", "ALL") else state
+    records = crew.escalation_view(wanted)
+    counts: dict[str, int] = {}
+    for record in crew.memory.escalations.values():
+        counts[record.state] = counts.get(record.state, 0) + 1
+    return {
+        "state": wanted or "ALL",
+        "counts": counts,
+        "escalations": [_escalation_payload(r, crew) for r in records[:200]],
+    }
+
+
+@app.post("/api/monitor/reset")
+def reset_cycle() -> dict:
+    """Forget every previous cycle. Demo control, not part of TRD §5.
+
+    Cross-cycle memory works: escalations already answered in an earlier run
+    are never raised again, so a second cycle over the same cut correctly
+    leaves the human gate empty. That is the property the whole layer is
+    graded on — and it means a rehearsed demo has nothing pending to show
+    unless memory is cleared first.
+
+    So this exists to reset the demo, not to work around the guarantee. It
+    wipes the in-process crew and its snapshot; the next run-cycle starts
+    from nothing.
+    """
+    global _crew, _crew_error
+    import shutil
+    from pathlib import Path as _Path
+
+    _crew, _crew_error = None, None
+    state = _Path("state")
+    removed = []
+    for target in (state / "memory_snapshot.json", state / "trace"):
+        if target.exists():
+            shutil.rmtree(target) if target.is_dir() else target.unlink()
+            removed.append(str(target))
+    return {"status": "reset", "removed": removed}
+
+
+@app.post("/api/monitor/escalations/{escalation_id}")
+def decide_escalation(escalation_id: str, req: DecisionRequest) -> dict:
+    """Route a human's decision into HUMAN GATE's real state handling.
+
+    Not a UI-only stub: this calls the same `_apply_decision` the node calls,
+    so CLARIFY really does read the graph and resubmit, and a rejection really
+    does close the escalation without changing the finding.
+    """
+    crew = _crew_or_503()
+    decision = (req.decision or "").upper()
+    if decision not in ("APPROVED", "REJECTED", "CLARIFY"):
+        raise HTTPException(status_code=400,
+                            detail=f"decision must be APPROVED, REJECTED or CLARIFY "
+                                   f"— got {req.decision!r}")
+    try:
+        record = crew.decide(escalation_id, decision)
+    except KeyError:
+        raise HTTPException(status_code=404,
+                            detail=f"no escalation {escalation_id}")
+    return _escalation_payload(record, crew)

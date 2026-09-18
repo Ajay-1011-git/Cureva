@@ -172,7 +172,8 @@ class ReviewCrew:
 
     def __init__(self, data_dir: str, atlas: Atlas,
                  state_dir: str | Path = "state",
-                 *, tribunal: bool = False, tribunal_budget: int = 1):
+                 *, tribunal: bool = False, tribunal_budget: int = 1,
+                 human_gate: str = "auto"):
         """`tribunal` is off by default, and that default is the whole point.
 
         Act 3 makes 6 network calls per finding. A real cut produces well over
@@ -204,6 +205,17 @@ class ReviewCrew:
         self.graph: StudyGraph = atlas.graph
         self.tribunal_enabled = tribunal
         self.tribunal_budget = tribunal_budget
+        # "auto"  — HUMAN GATE calls study.escalate() and applies the reply it
+        #           gets back. This is the graded behaviour.
+        # "defer" — escalations are raised and held PENDING for a real person
+        #           to decide on the review page. Their answer then runs
+        #           through exactly the same _apply_decision path, so the
+        #           three responses are not handled twice in two places.
+        #
+        # "defer" is also the only way PENDING is reachable at all, since
+        # study.escalate() always answers inline (docs/stage2-contract-audit
+        # §2). It is what makes the human gate a gate rather than a display.
+        self.human_gate = human_gate
         #: finding_id -> TribunalTranscript, for the review page to read.
         self.transcripts: dict[str, Any] = {}
         #: The last cycle's verdicts. `ReviewReport` has nowhere to carry the
@@ -629,6 +641,17 @@ class ReviewCrew:
                 usubjid=f.usubjid, site=f.site, summary=f.rationale,
                 raised_cycle=ctx.cycle_number, raised_cut=ctx.cut)
 
+            if self.human_gate == "defer":
+                # Raised, recorded, and left for a person. Nothing about the
+                # finding or the verdict changes; only who answers.
+                self.memory.record_escalation(record)
+                self._trace(ctx, "HUMAN_GATE", "escalation_raised",
+                            f"{f.code} for {target} raised and held PENDING for a "
+                            f"human decision",
+                            finding_id=verdict.finding_id, escalation_id=esc_id,
+                            evidence=f.evidence[:4])
+                continue
+
             try:
                 decision, reason = self.study.escalate(f.code, target)
             except Exception as exc:                              # noqa: BLE001
@@ -730,6 +753,50 @@ class ReviewCrew:
                         f"{record.code}: unrecognised monitor response {decision!r} - "
                         f"held PENDING rather than interpreted",
                         finding_id=record.finding_id, escalation_id=record.escalation_id)
+
+    def decide(self, escalation_id: str, decision: str) -> EscalationRecord:
+        """Apply a human's decision to a pending escalation.
+
+        This is the review page's entry point, and it deliberately does not
+        reimplement anything: it builds the same CycleContext the node uses and
+        calls the same `_apply_decision`, so APPROVED/REJECTED/CLARIFY behave
+        identically whether the answer came from `study.escalate()` or from a
+        person clicking a button. A second implementation for the UI is exactly
+        how the two would drift apart.
+
+        Raises KeyError for an unknown id; the caller turns that into a 404.
+        """
+        record = self.memory.escalations[escalation_id]
+        verdict = next((v for v in self.last_verdicts
+                        if v.finding_id == record.finding_id), None)
+
+        ctx = CycleContext(cut=record.raised_cut,
+                           protocol_version=self.graph.protocol_version_at(record.raised_cut),
+                           cycle_number=self.memory.cycle_number,
+                           started=time.perf_counter())
+
+        if verdict is None:
+            # The escalation outlived the cycle that raised it (a restart, or
+            # a decision made much later). CLARIFY needs a finding to read the
+            # subject's record counts from, so reconstruct a minimal one from
+            # what memory kept rather than failing the decision.
+            stub = Finding(code=record.code, usubjid=record.usubjid, site=record.site,
+                           rationale=record.summary or record.code, evidence=[])
+            verdict = Verdict(finding_id=record.finding_id, finding=stub,
+                              escalate=True, rule="restored from memory")
+
+        self._apply_decision(ctx, record, verdict, decision, "decided on the review page")
+        self.memory.record_escalation(record)
+        self.memory.snapshot()
+        return record
+
+    def escalation_view(self, state: str | None = None) -> list[EscalationRecord]:
+        """Escalations in memory, newest first, optionally filtered by state."""
+        records = list(self.memory.escalations.values())
+        if state:
+            records = [r for r in records if r.state == state.upper()]
+        return sorted(records, key=lambda r: (r.raised_cycle, r.escalation_id),
+                      reverse=True)
 
     def _clarification_for(self, record: EscalationRecord, verdict: Verdict) -> str:
         """Answer a CLARIFY from data already in the graph.
