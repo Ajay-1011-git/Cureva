@@ -458,3 +458,118 @@ and it is exercised by this stage's own test scripts, the same way Stage 2's
    `IMPLAUSIBLE_SITE_PATTERN` positive in the practice data.
 8. Groq free tier: RPM 30, RPD 1,000, TPM 8,000, TPD 200,000. Unchanged from
    Stage 2.
+
+---
+
+## 10. Addendum (found during T3.1): a finding can vanish for a reason that is not a correction
+
+T3.1's skeleton walk surfaced something FR-4 and T3.4 have to know about before
+supersession tracking is written.
+
+Walking `cuts=range(1, 4)` **twice against the same warm crew memory** gives:
+
+```
+run 1: 0.26s  decisions=18 escalations=18 signals=68
+run 2: 0.27s  decisions=18 escalations=18 signals=66
+  identical decision ids: True
+  zero new escalations  : True
+
+only in run 1:
+    SAE_UNESCALATED|042-S05-006|S05|1
+    SAE_UNESCALATED|042-S12-005|S12|1
+cut 3: run1=63 run2=61  lost=[both of the above]  gained=[]
+```
+
+This is **not a bug, and not a correction**. It is `_detect_sae_unescalated`'s
+documented, intended behaviour in `stage2/crew.py`:
+
+> Already escalated under this code? Then it is an ordinary escalation now and
+> this detector is done with it — permanently.
+
+An AE that was unescalated at cut 3 of the first walk got escalated during that
+walk, so on the second walk it is no longer *unescalated* and the detector
+correctly declines to re-raise it. The escalation itself is still there — that
+is why the escalation and decision counts are unchanged at 18, with zero new
+raised, which is what FR-12/NFR-5 actually require.
+
+### The trap this sets for T3.4
+
+FR-4's rule is "a finding present at an earlier cut and absent at a later one,
+because a correction changed the underlying value, is marked superseded". The
+naive implementation — diff this cut's finding-id set against the running set
+of everything seen so far — would tag both of those `SAE_UNESCALATED` findings
+as *superseded by a correction*. They were not. Nothing about their data
+changed; they were retired because the system acted on them.
+
+So T3.4 cannot infer supersession from absence alone. A finding that is absent
+this cut and **has a resolved escalation against it** was acted upon, not
+corrected, and must be recorded as such (or not recorded at all) rather than
+reported as a correction-superseded finding. Supersession is claimed only when
+the absence is not otherwise explained.
+
+### Determinism is otherwise exact
+
+Two separate processes, each with a fresh state directory, walking `range(1, 4)`:
+
+```
+run 1: signals=68 escalations=18 decisions=18
+  signals sha1 : 37c18d2995a62abd
+  escalations  : 00cc9fc7083a51fe
+  decisions    : 34ed6f615384e24c
+run 2: signals=68 escalations=18 decisions=18
+  signals sha1 : 37c18d2995a62abd
+  escalations  : 00cc9fc7083a51fe
+  decisions    : 34ed6f615384e24c
+```
+
+Byte-identical. A cold re-walk of the same period reproduces the same signals,
+escalations and decision ids exactly; the 68→66 difference above is the *warm*
+continuation case, and it is correct.
+
+---
+
+## 11. Addendum (found during T3.3): a finding stops being detected for three different reasons
+
+T3.3 measured what actually makes a finding disappear between cuts. There are
+three causes in this data, and only one of them is a correction. T3.4 has to
+tell them apart, because FR-4's report line is a claim about *why*.
+
+**1. A correction changed the value — does not happen on the real data.**
+All 200 corrections land at cut 5, all in `LB`, all with reason `central lab
+re-issue`, and their relative change is `min=0.0000 median=0.0139 max=0.0353`.
+Nothing that small flips a threshold. Measured directly: four cut-4 findings
+cite a record that gets corrected at cut 5, and **all four are still present at
+cut 5**. A synthetic correction is therefore required to exercise the path at
+all, and T3.3 builds one in a temp copy of the study rather than in
+`hackathon-data/`.
+
+**2. A missing record arrived — the one real case in the practice data.**
+`MISSING_EXPOSURE_RECORD|042-S08-007|S08` is present at cut 4 and absent at cut
+5. The cause is not a correction: that subject's first `EX` record has
+`cut_available=5`, so the record the finding was complaining about simply
+showed up. This is a genuine self-correcting-data case and it is the honest
+FR-4 demonstration on real data.
+
+**3. The system acted on it — see §10.** `SAE_UNESCALATED` retires permanently
+once escalated.
+
+### What T3.4 must therefore do
+
+Absence is the trigger, never the explanation. For each finding that was seen
+earlier and is absent now, T3.4 establishes the cause before writing a reason:
+
+* a correction is in force at this cut on a record the finding cited → cause
+  `correction`, and the reason names the old and new value;
+* the finding has a resolved escalation against it → cause `acted_upon`;
+* otherwise → cause `no_longer_detected`, and the reason says exactly that
+  rather than inventing a mechanism.
+
+### A detector robustness property worth recording
+
+Correcting `042-S05-003`'s ALT (LBSEQ 31, 238.9 → 52.0) does **not** clear its
+`HYS_LAW_CANDIDATE`: Stage 1's detector correctly falls back to AST (144.6 U/L,
+still > 3× the 120 U/L ULN). Only correcting the shared bilirubin term (LBSEQ
+33, 4.66 → 0.8) undoes the finding, because Hy's law needs bilirubin on both
+its ALT and AST branches. Any future test that expects to kill a finding by
+correcting one value should correct the *shared* term, not the first one it
+finds cited.
