@@ -4,17 +4,24 @@
  * Every animation in the app goes through here so that three things are true
  * everywhere rather than in most places:
  *
- *  1. **Reduced motion is honoured once.** `gsap.matchMedia` is not enough on
- *     its own, because elements start at opacity 0 to avoid a flash — if the
- *     timeline is skipped they would stay invisible. So the reduced-motion
- *     branch still *sets* the final state, it just does not travel there.
- *  2. **Nothing flashes before it animates.** `[data-reveal]` is hidden by CSS
- *     only while `js-motion-ready` is on the document, which this module sets
- *     synchronously on import. With JS disabled or broken the content is
- *     simply visible, which is the correct failure.
- *  3. **Triggers are cleaned up.** React 19 StrictMode mounts effects twice in
- *     development; a ScrollTrigger that is not reverted on unmount will fire
- *     against a detached node and pin the page at opacity 0.
+ *  1. **An interrupted animation always fails visible.** Every reveal is a
+ *     `from()` tween, so the state GSAP records and restores on revert is the
+ *     element's *natural* one. A tween killed halfway — which StrictMode's
+ *     double-mount does to every one of them in development — leaves the
+ *     element fully visible rather than stranded at whatever opacity it had
+ *     reached. Nothing here may depend on an animation running to completion
+ *     in order for content to be readable.
+ *  2. **Nothing flashes before it animates.** `immediateRender` applies the
+ *     from-values inside a layout effect, before the browser paints, so there
+ *     is no need to pre-hide anything in CSS. That matters: a CSS rule that
+ *     hides content until JS un-hides it turns any scripting failure into a
+ *     blank page.
+ *  3. **"Settled" means finished.** An element is only marked done in
+ *     `onComplete`. Marking it when the tween *starts* means a torn-down
+ *     animation can never be retried, because the next mount skips it.
+ *  4. **Triggers are cleaned up.** Everything is scoped to a `gsap.context`
+ *     that reverts on unmount, so a ScrollTrigger never fires against a
+ *     detached node.
  */
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import gsap from 'gsap'
@@ -24,13 +31,6 @@ import { Flip } from 'gsap/Flip'
 gsap.registerPlugin(ScrollTrigger, Flip)
 
 gsap.defaults({ ease: 'power3.out', duration: 0.7 })
-
-// Set synchronously at import time, before the first paint of any component
-// that relies on it, so the hide-then-reveal rule is never applied to a page
-// that will not get its reveal.
-if (typeof document !== 'undefined') {
-  document.documentElement.classList.add('js-motion-ready')
-}
 
 export const reducedMotion = () =>
   typeof window !== 'undefined'
@@ -58,9 +58,30 @@ export function useGsap(fn, deps = [], scopeRef = null) {
   return ref
 }
 
-/** Mark an element as settled so the CSS hide rule stops applying to it. */
+/** Mark an element as finished, so a later re-run leaves it alone. */
 const settle = (nodes) => {
   for (const n of nodes) n.setAttribute?.('data-reveal-done', '')
+}
+
+/**
+ * Snap an animation to its end if it has not finished by `deadlineMs`.
+ *
+ * GSAP damps its own clock whenever a frame takes longer than half a second
+ * (`lagSmoothing`), which is the right call for a scrubbing timeline and the
+ * wrong one here: on a machine struggling to paint two WebGL scenes it can
+ * stretch a 0.7s reveal into tens of seconds, and anything the animation was
+ * hiding stays hidden for all of it. The motion is decoration; the headline
+ * and the cards underneath it are not. Past a generous deadline the content
+ * simply arrives.
+ *
+ * Returns a disposer, so a context that reverts early does not fire it.
+ */
+export function armFailsafe(animation, deadlineMs, onSettled) {
+  const id = setTimeout(() => {
+    if (animation.progress() < 1) animation.progress(1)
+    onSettled?.()
+  }, deadlineMs)
+  return () => clearTimeout(id)
 }
 
 /**
@@ -79,7 +100,7 @@ export function useReveal(deps = [], options = {}) {
     if (!nodes.length) return
 
     if (reducedMotion()) {
-      gsap.set(nodes, { opacity: 1, y: 0, clearProps: 'transform' })
+      gsap.set(nodes, { clearProps: 'opacity,transform,willChange' })
       settle(nodes)
       return
     }
@@ -92,20 +113,43 @@ export function useReveal(deps = [], options = {}) {
       groups.get(key).push(node)
     }
 
+    const disposers = []
+
     for (const members of groups.values()) {
-      gsap.set(members, { opacity: 0, y })
-      gsap.to(members, {
-        opacity: 1, y: 0, duration, stagger,
+      // from(), not set()+to(): the recorded state is the natural one, so
+      // reverting a half-finished tween restores a *visible* element. The
+      // set()+to() form records opacity 0 as the baseline and strands the
+      // element at whatever value it had reached when it was killed.
+      let disarm = null
+      const finish = () => {
+        disarm?.()
+        settle(members)
+        gsap.set(members, { clearProps: 'transform,opacity,willChange' })
+      }
+
+      const tween = gsap.from(members, {
+        opacity: 0, y, duration, stagger,
         ease: 'power3.out',
+        immediateRender: true,
         scrollTrigger: { trigger: members[0], start, once: true },
-        onStart: () => settle(members),
-        onComplete: () => gsap.set(members, { clearProps: 'transform,willChange' }),
+        // Armed only once the tween is actually running, so a group still
+        // below the fold is not snapped open before it is ever reached.
+        onStart: () => {
+          disarm = armFailsafe(
+            tween,
+            duration * 1000 + stagger * 1000 * members.length + 1500,
+            finish)
+        },
+        onComplete: finish,
       })
+      disposers.push(() => disarm?.())
     }
 
     // Layout settles after fonts and the 3D canvas size themselves; without a
     // refresh the triggers keep the positions measured before that happened.
     ScrollTrigger.refresh()
+
+    return () => { for (const d of disposers) d() }
   }, deps)
 }
 
@@ -183,36 +227,6 @@ export function useMagnetic({ strength = 6 } = {}) {
   }, [strength])
 
   return ref
-}
-
-/**
- * Split a line of text into word spans for a staggered rise.
- *
- * Hand-rolled rather than GSAP's SplitText: this only ever needs words (not
- * chars or lines), and doing it here keeps the wrapper markup predictable for
- * the hero's tight 0.90 line-height, where an extra inline-block with the
- * wrong vertical-align visibly shifts the baseline.
- */
-export function splitWords(el) {
-  if (!el || el.dataset.split === 'done') {
-    return Array.from(el?.querySelectorAll('.split-word') || [])
-  }
-  const words = (el.textContent || '').split(/(\s+)/)
-  el.textContent = ''
-  const out = []
-  for (const word of words) {
-    if (!word.trim()) { el.appendChild(document.createTextNode(word)); continue }
-    const mask = document.createElement('span')
-    mask.className = 'split-mask'
-    const inner = document.createElement('span')
-    inner.className = 'split-word'
-    inner.textContent = word
-    mask.appendChild(inner)
-    el.appendChild(mask)
-    out.push(inner)
-  }
-  el.dataset.split = 'done'
-  return out
 }
 
 export { gsap, ScrollTrigger, Flip }

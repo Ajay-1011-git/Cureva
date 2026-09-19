@@ -234,15 +234,14 @@ a { color: inherit; }
   letter-spacing: -0.01em; color: var(--color-ink);
 }
 
-/* Anything animated on entry starts hidden, so a reveal cannot flash its
-   final state for one frame before the timeline picks it up. The class is
-   removed by the motion layer once GSAP owns the element — and if JS never
-   runs at all, this rule is overridden below so the page is still readable. */
+/* Deliberately NOT hidden here. The motion layer applies its from-values in a
+   layout effect, before the browser paints, so there is nothing to hide — and
+   a rule that hid content until JS revealed it would turn any scripting
+   failure, or any animation killed halfway, into a blank page. */
 [data-reveal] { will-change: transform, opacity; }
-.js-motion-ready [data-reveal]:not([data-reveal-done]) { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .js-motion-ready [data-reveal] { opacity: 1 !important; transform: none !important; }
+  [data-reveal] { opacity: 1 !important; transform: none !important; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

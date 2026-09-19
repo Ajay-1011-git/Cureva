@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import AskPanel from './AskPanel.jsx'
 import Icon, { BrandMark } from './Icon.jsx'
-import { gsap, reducedMotion, ScrollTrigger } from '../lib/motion.js'
+import { gsap, reducedMotion, ScrollTrigger, armFailsafe } from '../lib/motion.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -31,12 +31,24 @@ export default function Layout() {
   useEffect(() => {
     const el = mainRef.current
     if (!el) return
-    if (reducedMotion()) { gsap.set(el, { opacity: 1, y: 0 }); return }
-    const tween = gsap.fromTo(el,
-      { opacity: 0, y: 18 },
-      { opacity: 1, y: 0, duration: 0.55, ease: 'power3.out',
-        onComplete: () => ScrollTrigger.refresh() })
-    return () => tween.kill()
+    if (reducedMotion()) { gsap.set(el, { clearProps: 'opacity,transform' }); return }
+
+    const settle = () => {
+      gsap.set(el, { clearProps: 'opacity,transform' })
+      ScrollTrigger.refresh()
+    }
+    const tween = gsap.from(el,
+      { opacity: 0, y: 18, duration: 0.55, ease: 'power3.out', onComplete: settle })
+
+    // This one fades the entire page, so it is the animation least allowed to
+    // stall: starved of frames it leaves every route looking like it failed to
+    // load. Short deadline, because 0.55s is all it should ever need.
+    const disarm = armFailsafe(tween, 2000, settle)
+
+    // kill() stops the tween wherever it is — on its own that leaves the page
+    // stuck at a partial opacity when StrictMode tears the effect down
+    // mid-flight. revert() puts the element back to the state from() recorded.
+    return () => { disarm(); tween.revert() }
   }, [location.pathname])
 
   // --- shadow the bar only once the page has moved under it.
