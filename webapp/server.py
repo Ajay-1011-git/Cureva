@@ -666,11 +666,21 @@ def reset_cycle() -> dict:
 
     It touches only the session directory. The graded path's own state is a
     different directory and is never affected by this.
+
+    The period walk is reset alongside the review page, and it has to be: its
+    state lives inside the same session directory, so clearing that deletes the
+    trace file `explain()` reads. Resetting only the crew would leave a
+    StudyWatch still holding a finished report whose decision ids could no
+    longer be explained — every one of them would answer "no decision with that
+    id appears in the trace", which is true and useless. Both are dropped so
+    the next call rebuilds cleanly.
     """
-    global _crew, _crew_error
+    global _crew, _crew_error, _watch, _watch_error
     _crew, _crew_error = None, None
+    _watch, _watch_error = None, None
     _clear_session_state()
-    return {"status": "reset", "cleared": SESSION_STATE_DIR}
+    return {"status": "reset", "cleared": SESSION_STATE_DIR,
+            "reset": ["review cycle", "period walk"]}
 
 
 @app.post("/api/monitor/escalations/{escalation_id}")
@@ -693,3 +703,144 @@ def decide_escalation(escalation_id: str, req: DecisionRequest) -> dict:
         raise HTTPException(status_code=404,
                             detail=f"no escalation {escalation_id}")
     return _escalation_payload(record, crew)
+
+
+# ==========================================================================
+# The period walk — T3.20. Four routes, per cureva-stage3-trd.md §5.
+# ==========================================================================
+#
+# `StudyWatch` gets its OWN `ReviewCrew`, not the one the review page uses,
+# and the reason is budget rather than tidiness. The review page's crew runs
+# with the Tribunal enabled so a judge can watch one deliberation; a twelve-cut
+# period walk through that same crew would attempt a deliberation at every cut
+# and spend the day's entire Groq allowance on a page that never shows them.
+# The watch crew runs Tribunal-off and template-only, which is also exactly the
+# configuration the graded path uses — so what `/watch` renders is what the
+# grader would see.
+#
+# Its state is session-scoped for the same reason the review page's is: a demo
+# that correctly opens with everything already decided is the guarantee working
+# as designed and ruining the thing it is meant to demonstrate.
+WATCH_STATE_DIR = "state/session/watch"
+
+_watch = None
+_watch_error: str | None = None
+
+
+def _get_watch():
+    global _watch, _watch_error
+    if _watch is None and _watch_error is None:
+        try:
+            from stage2 import ReviewCrew
+            from stage3 import StudyWatch
+            watch_crew = ReviewCrew(DATA_DIR, _atlas, state_dir=WATCH_STATE_DIR,
+                                    tribunal=False)
+            _watch = StudyWatch(DATA_DIR, watch_crew, state_dir=WATCH_STATE_DIR)
+        except Exception as exc:                      # noqa: BLE001
+            _watch_error = f"{type(exc).__name__}: {exc}"
+            log.error("period walk unavailable: %s", _watch_error)
+    return _watch
+
+
+def _watch_or_503():
+    watch = _get_watch()
+    if watch is None:
+        raise HTTPException(status_code=503,
+                            detail=f"period walk unavailable: {_watch_error}")
+    return watch
+
+
+class RunPeriodRequest(BaseModel):
+    cuts: list[int] | None = None
+
+
+@app.post("/api/watch/run-period")
+def run_period(req: RunPeriodRequest) -> dict:
+    """Walk the period and return the real `SurveillanceReport`.
+
+    Single request/response, no streaming — the same call the grader makes.
+    It runs for a few seconds on the practice study; the page shows a progress
+    indicator rather than a live feed, which is the design decision this
+    project has now made three times for the same reason: a stream would be a
+    second code path telling the same story, and the two would drift.
+    """
+    watch = _watch_or_503()
+    cuts = req.cuts or list(range(1, 13))
+    started = time.perf_counter()
+    report = watch.run_period(cuts=cuts)
+    return {
+        "report": report.model_dump(mode="json"),
+        "duration_ms": int(round((time.perf_counter() - started) * 1000)),
+        "cuts": cuts,
+        # The per-cut ReviewReports have nowhere to live on the organiser's
+        # SurveillanceReport (docs/stage3-contract-audit.md §1), so the page
+        # gets the per-cut shape it needs alongside the graded object rather
+        # than bolted into it.
+        "per_cut": [
+            {"cut": r.cut, "protocol_version": r.protocol_version,
+             "findings": len(r.findings), "deviations": len(r.deviations),
+             "queries": len(r.queries), "escalations": len(r.escalations)}
+            for r in watch.reports
+        ],
+    }
+
+
+@app.get("/api/watch/explain/{decision_id}")
+def explain_decision(decision_id: str) -> dict:
+    """The real `Explanation` for one decision, read from the trace.
+
+    An unrecognised id returns a real `Explanation` saying so, with HTTP 200 —
+    never a bare 404. A 404 is indistinguishable from a routing mistake, and
+    "this decision does not exist in the trace" is a genuine answer this system
+    is able to give, not an error.
+    """
+    watch = _watch_or_503()
+    explanation = watch.explain(decision_id)
+    return {
+        "explanation": explanation.model_dump(mode="json"),
+        "found": bool(explanation.evidence_lines),
+        "trace_files": [str(p) for p in watch._trace_paths()],
+    }
+
+
+@app.get("/api/watch/forecast")
+def watch_forecast() -> dict:
+    """Forecasts for the fan chart, each carrying the decision it informed.
+
+    Served from `forecast_view()`, which is built from the escalations that
+    really received a forecast — so this route is structurally unable to
+    publish a prediction with no decision behind it (PRD FR-18).
+    """
+    watch = _watch_or_503()
+    rows = watch.forecast_view()
+    return {
+        "forecasts": rows,
+        "count": len(rows),
+        "walked": bool(watch.reports),
+        # Every forecast's assumptions travel with it. NFR-3 applies to the
+        # payload as much as to the page: a client that wanted to render the
+        # probability without them would have to work at it.
+        "note": ("Each forecast is context attached to a real escalation. "
+                 "Probabilities are model output under the stated assumptions, "
+                 "not predictions, and carry no date or external consequence."),
+    }
+
+
+@app.get("/api/watch/artifacts")
+def watch_artifacts() -> dict:
+    """Drafted paperwork, each tagged with how it was really produced."""
+    watch = _watch_or_503()
+    rows = watch.artifact_view()
+    return {
+        "artifacts": rows,
+        "count": len(rows),
+        "walked": bool(watch.reports),
+        "by_source": {
+            source: sum(1 for r in rows if r["source"] == source)
+            for source in ("template_only", "polished")
+        },
+        "by_kind": {
+            kind: sum(1 for r in rows if r["kind"] == kind)
+            for kind in ("IRB_MEMO", "SITE_QUERY", "AVATAR_RULE_UPDATE")
+        },
+    }
