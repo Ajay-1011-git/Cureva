@@ -44,6 +44,32 @@ CUTS = (1, 3, 5, 9, 12)
 fails: list[str] = []
 
 
+def baseline_crew_py(repo: Path) -> tuple[str, str]:
+    """The last version of stage2/crew.py from BEFORE this stage touched it.
+
+    Anchored to the newest commit whose crew.py does not yet contain the new
+    method, found by walking that file's history — not to HEAD.
+
+    Anchoring to HEAD was correct exactly until this work was committed, and
+    then silently wrong: once the branch merged, `HEAD:stage2/crew.py` became
+    the post-change file, the "before" and "after" were the same bytes, and the
+    comparison proved nothing while still reporting PASS. A regression test
+    that stops testing when the code ships is worse than no test, because it
+    goes on being cited.
+    """
+    revs = subprocess.run(
+        ["git", "log", "--format=%H", "--", "stage2/crew.py"],
+        cwd=repo, capture_output=True, text=True).stdout.split()
+    for rev in revs:                       # newest first
+        blob = subprocess.run(["git", "show", f"{rev}:stage2/crew.py"],
+                              cwd=repo, capture_output=True, text=True)
+        if blob.returncode == 0 and "run_cycle_with_extra_findings" not in blob.stdout:
+            return rev, blob.stdout
+    raise AssertionError(
+        "no commit of stage2/crew.py predates run_cycle_with_extra_findings — "
+        "the before/after comparison cannot be made")
+
+
 def check(label: str, cond: bool, detail: str = "") -> None:
     if not cond:
         fails.append(label)
@@ -57,14 +83,17 @@ print("=" * 74)
 
 orig = Path(tempfile.mkdtemp(prefix="cureva-t35-head-")) / "head"
 orig.mkdir(parents=True)
-archive = subprocess.run(["git", "archive", "HEAD"], cwd=REPO, capture_output=True)
+baseline_rev, head_crew = baseline_crew_py(REPO)
+archive = subprocess.run(["git", "archive", baseline_rev], cwd=REPO,
+                         capture_output=True)
 subprocess.run(["tar", "-x", "-C", str(orig)], input=archive.stdout, check=True)
 shutil.copytree(REPO / "hackathon-data", orig / "hackathon-data", dirs_exist_ok=True)
 (orig / "tests").mkdir(exist_ok=True)
 shutil.copy(RUNNER, orig / "tests" / RUNNER.name)
 
-head_crew = (orig / "stage2" / "crew.py").read_text()
 live_crew = (REPO / "stage2" / "crew.py").read_text()
+print(f"  baseline: {baseline_rev[:12]} — the last commit of crew.py without the "
+      f"new method")
 check("the pre-change crew.py really is different (otherwise this proves nothing)",
       head_crew != live_crew,
       f"HEAD {len(head_crew)} chars, working tree {len(live_crew)} chars")

@@ -20,6 +20,33 @@ REPO = Path(__file__).resolve().parent.parent
 fails, notes = [], []
 
 
+def baseline_crew_py(repo: Path) -> tuple[str, str]:
+    """The last version of stage2/crew.py from BEFORE this stage touched it.
+
+    Anchored to the newest commit whose crew.py does not yet contain the new
+    method, found by walking that file's history — not to HEAD.
+
+    Anchoring to HEAD was correct exactly until this work was committed, and
+    then silently wrong: once the branch merged, `HEAD:stage2/crew.py` became
+    the post-change file, the "before" and "after" were the same bytes, and the
+    comparison proved nothing while still reporting PASS. A regression test
+    that stops testing when the code ships is worse than no test, because it
+    goes on being cited.
+    """
+    revs = subprocess.run(
+        ["git", "log", "--format=%H", "--", "stage2/crew.py"],
+        cwd=repo, capture_output=True, text=True).stdout.split()
+    for rev in revs:                       # newest first
+        blob = subprocess.run(["git", "show", f"{rev}:stage2/crew.py"],
+                              cwd=repo, capture_output=True, text=True)
+        if blob.returncode == 0 and "run_cycle_with_extra_findings" not in blob.stdout:
+            return rev, blob.stdout
+    raise AssertionError(
+        "no commit of stage2/crew.py predates run_cycle_with_extra_findings — "
+        "the before/after comparison cannot be made")
+
+
+
 def check(n, label, cond, detail=""):
     if not cond:
         fails.append(f"{n}: {label}")
@@ -85,13 +112,13 @@ check(4, "all four Stage-3 detectors fire; LAB_UNIT_CORRUPTION on the real S04 c
 
 # 5 — run_cycle byte-identical (proved by its own test; re-assert the seam)
 crew_src = (REPO / "stage2" / "crew.py").read_text()
-head = subprocess.run(["git", "show", "HEAD:stage2/crew.py"], cwd=REPO,
-                      capture_output=True, text=True).stdout
+baseline_rev, head = baseline_crew_py(REPO)
 check(5, "run_cycle()'s body is shared, not duplicated, and the new method is additive",
       "def run_cycle_with_extra_findings" in crew_src
       and "return self._run_cycle(cut, protocol_version, extra_findings=[])" in crew_src
       and "def run_cycle_with_extra_findings" not in head,
-      "byte-identical output proved in test_t3_5_extra_findings.py")
+      f"baseline {baseline_rev[:12]}; byte-identical output proved in "
+      f"test_t3_5_extra_findings.py")
 
 # 6 — the slow human, including one that never resolves
 pending = [r for r in crew.memory.escalations.values() if r.state == "PENDING"]
@@ -153,9 +180,12 @@ check(10, "no practice-data id or threshold appears in any conditional",
 
 # 11 — schemas.py untouched; stage1 untouched; crew.py additive only
 def unchanged(rel):
-    head_text = subprocess.run(["git", "show", f"HEAD:{rel}"], cwd=REPO,
-                               capture_output=True, text=True)
-    return head_text.returncode == 0 and head_text.stdout == (REPO / rel).read_text()
+    """Whether a file this stage must not touch is byte-identical to the
+    baseline — the same pre-Stage-3 commit crew.py is compared against, not
+    HEAD, so this keeps meaning something after the work is committed."""
+    blob = subprocess.run(["git", "show", f"{baseline_rev}:{rel}"], cwd=REPO,
+                          capture_output=True, text=True)
+    return blob.returncode == 0 and blob.stdout == (REPO / rel).read_text()
 
 sig_re = re.compile(r"^\s{4}def (\w+)\(", re.M)
 head_sigs = set(sig_re.findall(head))
