@@ -222,12 +222,11 @@ export default function Monitor() {
                 </div>
               )}
 
-              {findingId ? (
-                <TribunalPanel findingId={findingId} onClose={() => setFindingId(null)} />
-              ) : deliberated.length > 0 ? (
+              {deliberated.length > 0 ? (
                 <div className="panel-picker">
                   {deliberated.map((v) => (
-                    <button key={v.finding_id} className="btn btn-ghost btn-sm"
+                    <button key={v.finding_id}
+                            className={`btn btn-ghost btn-sm${v.finding_id === findingId ? ' is-open' : ''}`}
                             onClick={() => setFindingId(v.finding_id)}>
                       <Icon name="scales" size={13} />
                       {v.code} · {v.usubjid || v.site}
@@ -239,6 +238,13 @@ export default function Monitor() {
                   <Icon name="scales" size={26} strokeWidth={1.4} />
                   <p>Pick an escalation with a deliberation, or run a cycle to produce one.</p>
                 </div>
+              )}
+
+              {/* Opens over the whole page, not in this column — the picker stays
+                  put underneath, so closing the transcript lands back on a list
+                  rather than on an empty heading. */}
+              {findingId && (
+                <TribunalPanel findingId={findingId} onClose={() => setFindingId(null)} />
               )}
             </section>
           </div>
