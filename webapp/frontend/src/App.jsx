@@ -3,6 +3,7 @@ import Layout from './components/Layout.jsx'
 import Atlas from './pages/Atlas.jsx'
 import AvatarTest from './pages/AvatarTest.jsx'
 import Monitor from './pages/Monitor.jsx'
+import Watch from './pages/Watch.jsx'
 
 /**
  * Route shell (T1.30).
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/atlas" element={<Atlas />} />
         <Route path="/avatar-test" element={<AvatarTest />} />
         <Route path="/monitor" element={<Monitor />} />
+        <Route path="/watch" element={<Watch />} />
         <Route path="*" element={<Navigate to="/atlas" replace />} />
       </Route>
     </Routes>
