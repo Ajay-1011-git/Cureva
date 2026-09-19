@@ -9,6 +9,10 @@ const GESTURES = ['idle', 'listening', 'concern_lean_in', 'explaining_gesture',
  *  it does not sit in the app looking like a different product. */
 export default function AvatarTest() {
   const [gesture, setGesture] = useState('idle')
+  // Co-speech gesture only runs while she is speaking. This page has no audio
+  // element, so without an explicit switch the arms never move and the page
+  // looks like the animation is broken — which is exactly how it did look.
+  const [speaking, setSpeaking] = useState(false)
   return (
     <div className="page-body">
       <div className="l-page">
@@ -17,7 +21,16 @@ export default function AvatarTest() {
           <p>Drives each gesture directly, without a backend turn.</p>
         </div>
         <div className="card avatar-card" style={{ maxWidth: 460 }}>
-          <AvatarCanvas gesture={gesture} />
+          <AvatarCanvas gesture={gesture} speaking={speaking} />
+        </div>
+        <div className="u-row" style={{ marginTop: 16 }}>
+          <button className={`btn ${speaking ? 'btn-primary' : 'btn-ghost'}`}
+                  data-speaking-toggle onClick={() => setSpeaking((s) => !s)}>
+            {speaking ? 'stop speaking' : 'start speaking'}
+          </button>
+          <span className="t-caption t-quiet" style={{ alignSelf: 'center' }}>
+            co-speech gesture — elbows, wrists and hands — runs only while speaking
+          </span>
         </div>
         <div className="u-row" style={{ marginTop: 16 }}>
           {GESTURES.map((g) => (

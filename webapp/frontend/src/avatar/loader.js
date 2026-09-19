@@ -38,6 +38,29 @@ const BONE_MAP = {
   RightUpLeg: 'rightUpperLeg', RightLeg: 'rightLowerLeg', RightFoot: 'rightFoot', RightToeBase: 'rightToes',
 }
 
+/**
+ * The 30 finger bones, added because they were being thrown away.
+ *
+ * This rig carries a full hand: three joints on every finger of both hands
+ * (thumb/index/middle/ring/pinky x 1,2,3). None of them were in BONE_MAP, so
+ * `loadAvatar` swept all thirty into `unmappedBones` and nothing could ever
+ * address them — the hands were rigid props on the ends of moving arms, which
+ * is most of why the speaking motion read as a mannequin rather than a person.
+ *
+ * Roles are named `<side><Finger><joint>` — e.g. `rightIndex2` — matching the
+ * anatomical naming in hands.js rather than the Sketchfab bone names, so the
+ * pose tables there never have to know what the exporter called things.
+ */
+const FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
+for (const side of ['Left', 'Right']) {
+  const role = side.toLowerCase()
+  for (const finger of FINGERS) {
+    for (const joint of [1, 2, 3]) {
+      BONE_MAP[`${side}Hand${finger}${joint}`] = `${role}${finger}${joint}`
+    }
+  }
+}
+
 /** `LeftHand_18` -> `LeftHand`. Sketchfab appends `_<n>` to every bone. */
 export function stripSuffix(name) {
   return name.replace(/_\d+$/, '')

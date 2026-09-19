@@ -100,16 +100,16 @@ export const GESTURE_POSES = {
     leftLowerArm: { x: DEG(-16), y: DEG(8), z: 0 },
   },
   explaining_gesture: {
-    // Offsets FROM the relaxed stance. X-axis rotation is what moves the
-    // upper-arm bone in the image plane on this rig — Y and Z rotate it
-    // toward or away from the camera, which is invisible from a front view.
-    // Found by rendering and looking, the same way the source loader.ts's
-    // comments describe having to measure this rig rather than assume a
-    // standard convention.
+    // HEAD ONLY, deliberately. This pose used to raise the right arm as well
+    // (upperArm x -48 / z -10, lowerArm x -26 / y -24, hand x -10). It cannot
+    // any more: cospeech.js now owns the arms while she is speaking, and this
+    // is the one named pose that is active at the same time as speech. Leaving
+    // the arm offsets in made the two layers compound — roughly doubling the
+    // raise and putting the hand up near her face.
+    //
+    // So the arms belong to the co-speech layer and this contributes only the
+    // slight head lift that goes with explaining something.
     head: { x: DEG(-4), y: 0, z: 0 },
-    rightUpperArm: { x: DEG(-48), y: 0, z: DEG(-10) },
-    rightLowerArm: { x: DEG(-26), y: DEG(-24), z: 0 },
-    rightHand: { x: DEG(-10), y: 0, z: 0 },
   },
   reassure_nod: {
     // animated (a nod cycle), handled specially in the render loop below

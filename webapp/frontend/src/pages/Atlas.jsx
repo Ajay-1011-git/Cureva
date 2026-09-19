@@ -17,7 +17,6 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
  * the turn's PRO write mapped into a new finding.
  */
 export default function Atlas() {
-  const [gesture, setGesture] = useState('idle')
   const [text, setText] = useState('')
   const [messages, setMessages] = useState([])
   const [busy, setBusy] = useState(false)
@@ -36,7 +35,21 @@ export default function Atlas() {
     import.meta.env.VITE_DEMO_SUBJECT || '042-S07-001')
   const audioRef = useRef(null)
   const [audioEl, setAudioEl] = useState(null)
+  // Drives the co-speech gesture layer when a turn comes back with NO audio to
+  // play (degraded voice). Without it a degraded turn is completely still:
+  // gesture is gated on speech, and there is no speech to gate on.
+  const [speakingNoAudio, setSpeakingNoAudio] = useState(false)
+  const [speakingAudio, setSpeakingAudio] = useState(false)
+  const speakTimer = useRef(null)
   const logRef = useRef(null)
+
+  // Exactly two poses, by design: she explains while she is talking and
+  // listens the rest of the time. The backend still returns a `gesture` for
+  // each turn (concern_lean_in, reassure_nod, farewell_wave...) and it is
+  // deliberately ignored here — a pose switching on an LLM's say-so was more
+  // distracting than expressive.
+  const speaking = speakingAudio || speakingNoAudio
+  const gesture = speaking ? 'explaining_gesture' : 'listening'
 
   const bodyRef = useReveal([])
   const sendRef = useMagnetic({ strength: 4 })
@@ -51,8 +64,22 @@ export default function Atlas() {
   useEffect(() => {
     const el = new Audio()
     el.crossOrigin = 'anonymous'
+    // The pose depends on whether she is mid-sentence, so we need the real
+    // start and end of playback, not just that a turn arrived.
+    const start = () => setSpeakingAudio(true)
+    const stop = () => setSpeakingAudio(false)
+    el.addEventListener('playing', start)
+    el.addEventListener('ended', stop)
+    el.addEventListener('pause', stop)
+    el.addEventListener('error', stop)
     audioRef.current = el
     setAudioEl(el)
+    return () => {
+      el.removeEventListener('playing', start)
+      el.removeEventListener('ended', stop)
+      el.removeEventListener('pause', stop)
+      el.removeEventListener('error', stop)
+    }
   }, [])
 
   // Keep the newest turn in view. Without this the transcript silently grows
@@ -65,7 +92,6 @@ export default function Atlas() {
   const sendTurn = useCallback(async (payload) => {
     setBusy(true)
     setEngaged(true)
-    setGesture('listening')
     try {
       const resp = await fetch(`${API_BASE}/api/atlas/avatar-turn`, {
         method: 'POST',
@@ -84,7 +110,6 @@ export default function Atlas() {
         { role: 'patient', text: heard, spoken: !payload.text },
         { role: 'avatar', text: data.reply_text, extracted: data.extracted,
           redFlags: data.red_flags || [] }])
-      setGesture(data.gesture)
       setDegraded(Boolean(data.degraded))
 
       if (data.reply_audio_b64 && audioRef.current) {
@@ -94,12 +119,19 @@ export default function Atlas() {
         const blob = new Blob([buf], { type: 'audio/wav' })
         audioRef.current.src = URL.createObjectURL(blob)
         audioRef.current.play().catch(() => {})
+      } else if (data.reply_text) {
+        // No audio came back. Gesture for roughly as long as the line would
+        // take to say — ~14 characters a second is an unhurried speaking rate —
+        // so a degraded turn still reads as her saying something.
+        const ms = Math.min(20000, Math.max(1500, (data.reply_text.length / 14) * 1000))
+        setSpeakingNoAudio(true)
+        clearTimeout(speakTimer.current)
+        speakTimer.current = setTimeout(() => setSpeakingNoAudio(false), ms)
       }
       return data
     } catch (err) {
       console.error('avatar-turn failed', err)
       setDegraded(true)
-      setGesture('idle')
       setMessages((m) => [...m, { role: 'system', text: 'Could not reach the avatar service.' }])
     } finally {
       setBusy(false)
@@ -111,7 +143,7 @@ export default function Atlas() {
   // A conversation belongs to one subject. Switching person clears the log —
   // leaving another patient's words on screen under a new name would be
   // misleading in exactly the way clinical records must never be.
-  useEffect(() => { setMessages([]); setGesture('idle'); setEngaged(false) }, [usubjid])
+  useEffect(() => { setMessages([]); setEngaged(false) }, [usubjid])
 
   const handleSend = async () => {
     if (!text.trim() || busy) return
@@ -166,7 +198,8 @@ export default function Atlas() {
           <div className="atlas-grid">
             <section className="atlas-col">
               <div className="card avatar-card" data-reveal data-reveal-group="left">
-                <AvatarCanvas gesture={gesture} audioEl={audioEl} engaged={engaged} />
+                <AvatarCanvas gesture={gesture} audioEl={audioEl} engaged={engaged}
+                              speaking={speaking} />
               </div>
 
               <div className="card chat-card" data-reveal data-reveal-group="left">
