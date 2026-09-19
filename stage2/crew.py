@@ -239,7 +239,45 @@ class ReviewCrew:
     # The graded entry point
     # =====================================================================
     def run_cycle(self, cut: int, protocol_version: int) -> ReviewReport:
-        """One review cycle. Six nodes, in order, every time."""
+        """One review cycle. Six nodes, in order, every time.
+
+        Behaviour is unchanged by Stage 3's addition below: this calls the
+        shared implementation with no extra findings, which is exactly what
+        the body used to do inline.
+        """
+        return self._run_cycle(cut, protocol_version, extra_findings=[])
+
+    def run_cycle_with_extra_findings(
+        self, cut: int, protocol_version: int,
+        extra_findings: list[Finding],
+    ) -> ReviewReport:
+        """Same six-node pipeline as run_cycle(), except DETECT's collected
+        findings are extra_findings + the usual internal sweep, before
+        MEDICAL REVIEW runs. Does not change run_cycle()'s existing behavior.
+
+        Stage 3's four cut-over-cut detectors need multi-cut context that a
+        single `Atlas.answer()` at one cut structurally cannot have, which is
+        why they were kept out of Stage 1's snapshot registry. This is the one
+        seam they join through -- so `StudyWatch` never reimplements any part
+        of MEDICAL REVIEW, DATA MANAGER, COMPLIANCE, HUMAN GATE or EXECUTE.
+
+        An extra finding is treated exactly like a detected one from here on:
+        it is reviewed, may be queried, may become a deviation, and may reach
+        the human gate. It is not privileged in any way.
+        """
+        return self._run_cycle(cut, protocol_version,
+                               extra_findings=list(extra_findings or []))
+
+    def _run_cycle(self, cut: int, protocol_version: int,
+                   extra_findings: list[Finding]) -> ReviewReport:
+        """The real body, shared by both public entry points.
+
+        This is a pure extraction of what `run_cycle()` used to contain. The
+        only addition is that `extra_findings` is handed to DETECT; with an
+        empty list -- which is what `run_cycle()` passes -- every line below
+        does what it did before, in the same order. T3.5's regression check
+        proves that against a real cut rather than asserting it.
+        """
         started = time.perf_counter()
 
         # Snapshot the graph at this cut so every detector, every corrected
@@ -263,7 +301,7 @@ class ReviewCrew:
                         f"caller passed protocol_version={protocol_version} but cut {cut} "
                         f"is governed by v{resolved_version}; using v{resolved_version}")
 
-        self._node_detect(ctx)
+        self._node_detect(ctx, extra_findings)
         self._node_medical_review(ctx)
         self.last_verdicts = ctx.verdicts
         self._node_data_manager(ctx)
@@ -291,13 +329,31 @@ class ReviewCrew:
     # =====================================================================
     # 1. DETECT
     # =====================================================================
-    def _node_detect(self, ctx: CycleContext) -> None:
+    def _node_detect(self, ctx: CycleContext,
+                     extra_findings: list[Finding] | None = None) -> None:
         """Sweep every snapshot code through `Atlas.answer()`.
 
         An empty result for a code is a correct, honest outcome -- the same
         honesty Stage 1's traps are built on -- not a gap to fill in with a
         second, looser pass.
+
+        `extra_findings` carries Stage 3's cut-over-cut findings in. They are
+        collected first, then the internal sweep runs unchanged. When the list
+        is empty -- every `run_cycle()` call -- nothing here executes at all,
+        not even a trace line, which is what keeps the old behaviour byte-
+        identical rather than merely equivalent.
         """
+        if extra_findings:
+            ctx.findings.extend(extra_findings)
+            by_code: dict[str, int] = {}
+            for finding in extra_findings:
+                by_code[finding.code] = by_code.get(finding.code, 0) + 1
+            self._trace(ctx, "DETECT", "finding_detected",
+                        f"{len(extra_findings)} cross-cut finding(s) supplied by "
+                        f"StudyWatch at cut {ctx.cut}: "
+                        + ", ".join(f"{c}={n}" for c, n in sorted(by_code.items())),
+                        evidence=[e for f in extra_findings for e in f.evidence][:8])
+
         for code in SNAPSHOT_CODES:
             t0 = time.perf_counter()
             question = Question(
