@@ -1,0 +1,555 @@
+{
+  "stage": 3,
+  "period": "cuts 1-12",
+  "cuts": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "walk_seconds": 3.95,
+  "per_cut": [
+    {
+      "cut": 1,
+      "protocol_version": 1,
+      "findings": 38,
+      "deviations": 9,
+      "queries": 37,
+      "trace_lines": 104
+    },
+    {
+      "cut": 2,
+      "protocol_version": 1,
+      "findings": 50,
+      "deviations": 23,
+      "queries": 63,
+      "trace_lines": 157
+    },
+    {
+      "cut": 3,
+      "protocol_version": 1,
+      "findings": 63,
+      "deviations": 34,
+      "queries": 84,
+      "trace_lines": 208
+    },
+    {
+      "cut": 4,
+      "protocol_version": 1,
+      "findings": 63,
+      "deviations": 55,
+      "queries": 120,
+      "trace_lines": 255
+    },
+    {
+      "cut": 5,
+      "protocol_version": 2,
+      "findings": 152,
+      "deviations": 142,
+      "queries": 395,
+      "trace_lines": 759
+    },
+    {
+      "cut": 6,
+      "protocol_version": 2,
+      "findings": 185,
+      "deviations": 170,
+      "queries": 493,
+      "trace_lines": 949
+    },
+    {
+      "cut": 7,
+      "protocol_version": 2,
+      "findings": 212,
+      "deviations": 196,
+      "queries": 593,
+      "trace_lines": 1126
+    },
+    {
+      "cut": 8,
+      "protocol_version": 2,
+      "findings": 228,
+      "deviations": 210,
+      "queries": 649,
+      "trace_lines": 1229
+    },
+    {
+      "cut": 9,
+      "protocol_version": 3,
+      "findings": 254,
+      "deviations": 236,
+      "queries": 753,
+      "trace_lines": 1409
+    },
+    {
+      "cut": 10,
+      "protocol_version": 3,
+      "findings": 273,
+      "deviations": 256,
+      "queries": 829,
+      "trace_lines": 1547
+    },
+    {
+      "cut": 11,
+      "protocol_version": 3,
+      "findings": 319,
+      "deviations": 302,
+      "queries": 1013,
+      "trace_lines": 1869
+    },
+    {
+      "cut": 12,
+      "protocol_version": 3,
+      "findings": 325,
+      "deviations": 308,
+      "queries": 1037,
+      "trace_lines": 1915
+    }
+  ],
+  "signals_by_code": {
+    "AE_BEFORE_FIRST_DOSE": 8,
+    "DOCUMENT_TAMPERED": 1,
+    "DOSING_ERROR": 18,
+    "DUPLICATE_SUBJECT": 2,
+    "EXCLUSION_VIOLATION": 4,
+    "HYS_LAW_CANDIDATE": 3,
+    "IMPLAUSIBLE_SITE_PATTERN": 1,
+    "INCLUSION_VIOLATION": 5,
+    "LAB_UNIT_CORRUPTION": 1,
+    "LATE_DATA_ENTRY": 1,
+    "MISSING_EXPOSURE_RECORD": 26,
+    "PROHIBITED_CONMED": 9,
+    "SAE_MISCODED": 1,
+    "SAE_UNESCALATED": 5,
+    "VISIT_OUT_OF_WINDOW": 272
+  },
+  "escalation_states": {
+    "APPROVED": 154,
+    "PENDING": 107,
+    "REJECTED": 2
+  },
+  "superseded": [
+    {
+      "finding_id": "F-93b5d193b7ac",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 2,
+      "reason": "no longer detected as of cut 2; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-56b5337eef08",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 2,
+      "reason": "no longer detected as of cut 2; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-699ecd9e693f",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 2,
+      "reason": "no longer detected as of cut 2; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-dbfcbfa66290",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 2,
+      "reason": "no longer detected as of cut 2; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-39d6e2d7c00b",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 2,
+      "reason": "no longer detected as of cut 2; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-4f703f828815",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-fc9ee858922e",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-5bbb27456395",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-f3a558df6cf1",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-2b48d312b70e",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-d49e63412e00",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-2f62eb2e3915",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-adc473542294",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-0aca30ab62b5",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-8ef90291e933",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-9ba6d9c01c1a",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-2873d935e176",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-a61d2cf9b47c",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-53551a67bcaf",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-cd479d02bf40",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-44ee12455068",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-990abc1f4371",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-217f4459b705",
+      "escalation_id": null,
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-0da4df8ed20c",
+      "escalation_id": "ESC-0da4df8ed20c",
+      "first_raised_cut": 1,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 1 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-89eda4ada255",
+      "escalation_id": "ESC-89eda4ada255",
+      "first_raised_cut": 3,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 3 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-098a01dfb6c6",
+      "escalation_id": "ESC-098a01dfb6c6",
+      "first_raised_cut": 3,
+      "superseded_at_cut": 4,
+      "reason": "no longer detected as of cut 4; the condition that raised it at cut 3 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-9adabc41d2e6",
+      "escalation_id": null,
+      "first_raised_cut": 2,
+      "superseded_at_cut": 5,
+      "reason": "no longer detected as of cut 5; the condition that raised it at cut 2 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-877b816befd8",
+      "escalation_id": "ESC-877b816befd8",
+      "first_raised_cut": 5,
+      "superseded_at_cut": 6,
+      "reason": "no longer detected as of cut 6; the condition that raised it at cut 5 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-ef1c9311538f",
+      "escalation_id": "ESC-ef1c9311538f",
+      "first_raised_cut": 7,
+      "superseded_at_cut": 8,
+      "reason": "no longer detected as of cut 8; the condition that raised it at cut 7 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-cffa2c806b97",
+      "escalation_id": "ESC-cffa2c806b97",
+      "first_raised_cut": 8,
+      "superseded_at_cut": 9,
+      "reason": "no longer detected as of cut 9; the condition that raised it at cut 8 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-ceb5c343944d",
+      "escalation_id": "ESC-ceb5c343944d",
+      "first_raised_cut": 8,
+      "superseded_at_cut": 9,
+      "reason": "no longer detected as of cut 9; the condition that raised it at cut 8 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    },
+    {
+      "finding_id": "F-2f0c64a5accc",
+      "escalation_id": "ESC-2f0c64a5accc",
+      "first_raised_cut": 9,
+      "superseded_at_cut": 10,
+      "reason": "no longer detected as of cut 10; the condition that raised it at cut 9 no longer holds, and no correction is in force on any record it cited.",
+      "cause": "no_longer_detected"
+    }
+  ],
+  "kris": [
+    {
+      "site": "S11",
+      "deviation_rate": 0.1,
+      "query_rate": 0.1,
+      "late_entry_score": 0.1429,
+      "implausibility": 0.9661,
+      "sae_rate": 0.0,
+      "risk": 0.9661
+    },
+    {
+      "site": "S08",
+      "deviation_rate": 1.45,
+      "query_rate": 5.5,
+      "late_entry_score": 0.9,
+      "implausibility": 0.0382,
+      "sae_rate": 0.0,
+      "risk": 0.9
+    },
+    {
+      "site": "S01",
+      "deviation_rate": 1.4,
+      "query_rate": 4.95,
+      "late_entry_score": 0.0,
+      "implausibility": 0.0189,
+      "sae_rate": 0.1,
+      "risk": 0.7799
+    },
+    {
+      "site": "S09",
+      "deviation_rate": 2.65,
+      "query_rate": 5.95,
+      "late_entry_score": 0.0,
+      "implausibility": 0.0926,
+      "sae_rate": 0.0,
+      "risk": 0.6585
+    },
+    {
+      "site": "S02",
+      "deviation_rate": 1.3,
+      "query_rate": 4.95,
+      "late_entry_score": 0.0,
+      "implausibility": 0.0801,
+      "sae_rate": 0.05,
+      "risk": 0.6007
+    },
+    {
+      "site": "S07",
+      "deviation_rate": 1.6,
+      "query_rate": 6.1,
+      "late_entry_score": 0.0,
+      "implausibility": 0.058,
+      "sae_rate": 0.0,
+      "risk": 0.5346
+    },
+    {
+      "site": "S05",
+      "deviation_rate": 1.0,
+      "query_rate": 3.5238,
+      "late_entry_score": 0.0,
+      "implausibility": 0.0,
+      "sae_rate": 0.0476,
+      "risk": 0.4771
+    },
+    {
+      "site": "S06",
+      "deviation_rate": 1.5,
+      "query_rate": 5.0,
+      "late_entry_score": 0.0,
+      "implausibility": 0.0675,
+      "sae_rate": 0.0,
+      "risk": 0.4619
+    },
+    {
+      "site": "S12",
+      "deviation_rate": 0.9,
+      "query_rate": 3.05,
+      "late_entry_score": 0.0,
+      "implausibility": 0.0065,
+      "sae_rate": 0.05,
+      "risk": 0.4465
+    },
+    {
+      "site": "S10",
+      "deviation_rate": 1.25,
+      "query_rate": 4.7,
+      "late_entry_score": 0.0,
+      "implausibility": 0.0569,
+      "sae_rate": 0.0,
+      "risk": 0.4141
+    },
+    {
+      "site": "S04",
+      "deviation_rate": 1.3,
+      "query_rate": 4.5,
+      "late_entry_score": 0.0,
+      "implausibility": 0.1767,
+      "sae_rate": 0.0,
+      "risk": 0.4094
+    },
+    {
+      "site": "S03",
+      "deviation_rate": 0.9,
+      "query_rate": 3.35,
+      "late_entry_score": 0.0,
+      "implausibility": 0.2056,
+      "sae_rate": 0.0,
+      "risk": 0.2963
+    }
+  ],
+  "budget": {
+    "cuts_walked": 12,
+    "duration_ms": 3712,
+    "tokens_spent": 0,
+    "trace_lines": 11527,
+    "rollouts_run": 24000,
+    "rollouts_run_this_walk": 24000,
+    "superseded_findings": 32,
+    "tokens": {
+      "ceiling": 20000,
+      "spent": 0,
+      "remaining": 20000,
+      "skipped": 0,
+      "skips": [],
+      "daily_limit": 200000,
+      "share_of_daily_limit": 0.1
+    },
+    "time": {
+      "rollout_ceiling": 500,
+      "rollout_floor": 50,
+      "rollouts_available_now": 500,
+      "rollouts_run": 24000,
+      "hard_deadline_s": 90.0,
+      "elapsed_s": 3.819,
+      "degradations": []
+    },
+    "degradation_order": [
+      "Act 5 LLM polish (falls back to the template \u2014 same facts, plainer prose)",
+      "Act 3 Tribunal (off by default; the rule-based verdict is unchanged)",
+      "Monte Carlo rollout count (halved, never below the stated floor)"
+    ],
+    "never_degrades": [
+      "DETECT \u2014 every detector, every cut",
+      "COMPLIANCE \u2014 protocol deviations",
+      "HUMAN GATE \u2014 escalations and their decisions",
+      "Supersession tracking",
+      "Trace writing"
+    ]
+  },
+  "idempotency": {
+    "escalations_after_first_walk": 263,
+    "escalations_after_second_walk": 263,
+    "queries_after_first_walk": 1037,
+    "queries_after_second_walk": 1037,
+    "new_escalations_on_re_walk": 0,
+    "new_queries_on_re_walk": 0,
+    "holds": true
+  }
+}
