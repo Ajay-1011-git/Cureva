@@ -25,3 +25,6 @@ instructions/
 
 # organiser dataset archive
 hackathon-data*.zip
+
+# macOS
+.DS_Store
